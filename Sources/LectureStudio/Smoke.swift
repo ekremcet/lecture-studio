@@ -14,6 +14,11 @@ enum Smoke {
         func note(_ s: String) { log += s + "\n"; try? log.write(to: out.appendingPathComponent("smoke.txt"), atomically: true, encoding: .utf8) }
         if ProcessInfo.processInfo.environment["STUDIO_IMPORT_ENV"] == "1" { AppSettings.importDotEnv(); store.agent.load(); Task { await store.loadModels() } }
         Task {
+            // `STUDIO_WINDOW=WxH` (points) sizes the main window, for screenshots larger than the screen.
+            if let spec = ProcessInfo.processInfo.environment["STUDIO_WINDOW"], let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) {
+                let parts = spec.split(separator: "x").compactMap { Double($0) }
+                if parts.count == 2 { w.setFrame(NSRect(x: 0, y: 0, width: parts[0], height: parts[1]), display: true) }
+            }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             note("repo=\(store.repo?.root.path ?? "none") files=\(store.files.count) lectures=\(store.lectures.count) sources=\(store.repoSources) profileExists=\(String(describing: store.profileExists)) stage=\(store.stage)")
             let courses = Set(store.files.map(\.course)).filter { $0 != "(root)" }.sorted()
@@ -61,20 +66,26 @@ enum Smoke {
             note("editor probe: \(eprobe ?? "nil")")
             await store.runQa()
             if let qa = store.qa { note("qa: slides=\(qa.slides.count) overflow=\(qa.overflowPages) missing=\(qa.missingImagePages)") }
-            store.goToSlide(min(3, max(0, store.slideCount - 1)), from: "rail")
+            let slide = Int(ProcessInfo.processInfo.environment["STUDIO_SMOKE_SLIDE"] ?? "") ?? 3
+            store.goToSlide(min(slide, max(0, store.slideCount - 1)), from: "rail")
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             note("current=\(store.current) notes=\(store.notes)")
             await Snapshot.capture(to: out.appendingPathComponent("work"))
             note("git available=\(store.gitAvailable)")
-            let before = store.editorText.count
-            store.editor.insertBlock("\n---\n\n# {cursor}\n\n")
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            let ins = try? await store.editor.webView.evaluateJavaScript("JSON.stringify({len: window.studioEditor.getValue().length, head: (() => { const v = window.studioEditor; return v.getValue().slice(0, 12); })()})")
-            note("insertBlock: before=\(before) after=\(store.editorText.count) dirty=\(store.dirty) js=\(ins ?? "nil")")
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_EDIT"] != "0" {
+                let before = store.editorText.count
+                store.editor.insertBlock("\n---\n\n# {cursor}\n\n")
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                let ins = try? await store.editor.webView.evaluateJavaScript("JSON.stringify({len: window.studioEditor.getValue().length, head: (() => { const v = window.studioEditor; return v.getValue().slice(0, 12); })()})")
+                note("insertBlock: before=\(before) after=\(store.editorText.count) dirty=\(store.dirty) js=\(ins ?? "nil")")
+            }
             store.startPresentation()
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             store.presentation.next()
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            // The presenter window sits behind the audience window on a one-screen machine; bring it up so it paints.
+            for w in NSApp.windows where w.title.isEmpty && w.styleMask.contains(.borderless) && w.isVisible { w.level = .normal; w.orderBack(nil) }
+            NSApp.windows.first(where: { $0.title == "Presenter" })?.makeKeyAndOrderFront(nil)
+            try? await Task.sleep(nanoseconds: Int(ProcessInfo.processInfo.environment["STUDIO_SMOKE_PRESENT_WAIT"] ?? "") .map { UInt64($0) * 1_000_000_000 } ?? 1_500_000_000)
             note("presenting=\(store.presentation.presenting) index=\(store.presentation.index) count=\(store.presentation.count) notes=\(store.presentation.notes.count) windows=\(NSApp.windows.filter { $0.isVisible }.map { $0.title })")
             let showDir = out.appendingPathComponent("present")
             try? FileManager.default.createDirectory(at: showDir, withIntermediateDirectories: true)
@@ -103,13 +114,15 @@ enum Smoke {
                 note("chat: oberik=\(AppSettings.hasOberik) models=\(store.models?.models.count ?? -1) default=\(store.models?.defaultModel ?? "-")")
                 if let pong = try? await store.agent.ping() { note("chat: ping -> \(pong.prefix(80))") } else { note("chat: ping failed") }
                 note("chat: sending read-only turn (model=\(store.model.isEmpty ? "default" : store.model))")
-                await store.sendMessage(scope: scope, text: "Call list_sources and tell me in one sentence how many source files are attached and which are ready. Do not edit any file.")
+                let prompt = ProcessInfo.processInfo.environment["STUDIO_SMOKE_PROMPT"] ?? "Call list_sources and tell me in one sentence how many source files are attached and which are ready. Do not edit any file."
+                await store.sendMessage(scope: scope, text: prompt)
                 let conv = store.conversation(scope.key)
                 for _ in 0..<120 { if !conv.running { break }; try? await Task.sleep(nanoseconds: 1_000_000_000) }
                 let last = conv.messages.last
                 note("chat: running=\(conv.running) session=\(conv.sessionId ?? "-") events=\(last?.events ?? []) error=\(last?.error ?? "none")\nreply=\(last?.content ?? "")\ncitations=\(last?.citations.count ?? 0)")
                 await Snapshot.capture(to: out.appendingPathComponent("chat"))
             }
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_HOME"] == "1" { store.backToLectures(); try? await Task.sleep(nanoseconds: 3_000_000_000) }
             note("done")
         }
     }
