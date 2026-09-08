@@ -1,0 +1,12 @@
+{
+  "name": "marp-slides",
+  "version": "0.1.0",
+  "description": "Write, check, and illustrate Marp lecture and talk decks from the presenter's source materials, with speaker notes and instructor guides, inside their material repository.",
+  "skills": [
+    "skills/marp-deck-writer",
+    "skills/deck-qa",
+    "skills/instructor-guide",
+    "skills/speaker-notes",
+    "skills/slide-images"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "lecture-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lecture Studio for macOS: lecture and talk decks in Marp Markdown, written from your sources with an Oberik agent.",
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "package": "bash scripts/package.sh",
+    "web:build": "npm --prefix web-core run build",
+    "web:watch": "npm --prefix web-core run watch",
+    "oberik:setup": "tsx scripts/oberik-setup.ts",
+    "skills:build": "bash scripts/build-skill-pack.sh",
+    "skills:publish": "bash scripts/build-skill-pack.sh && tsx scripts/oberik-setup.ts"
+  },
+  "devDependencies": {
+    "@oberik/sdk": "^0.79.0",
+    "@types/node": "^26.4.1",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

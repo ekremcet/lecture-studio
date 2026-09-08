@@ -1,0 +1,46 @@
+/* @theme ytu-talk */
+/*
+ * The style family used by talks (seminar-ai-in-science, startup-presentation, yzm4015
+ * workshops): 22px base, colored h1, colored boxes, an absolute .source footer and a .timer badge.
+ * The accent color is a custom property so a deck can override it in one line:
+ *   <style> :root { --accent: #6366f1; } </style>
+ */
+@import 'default';
+
+:root { --accent: #0066cc; }
+
+section {
+  font-size: 22px; padding: 32px; text-align: left;
+  box-sizing: border-box; overflow: hidden;
+}
+section h1 { font-size: 42px; margin-bottom: 20px; color: var(--accent); }
+section h2 { font-size: 32px; margin-bottom: 15px; color: #333; }
+section h3 { font-size: 26px; margin-bottom: 10px; color: #555; }
+
+.columns { display: flex; gap: 12px; flex-wrap: wrap; max-width: 100%; }
+.two-columns { display: flex; gap: 24px; }
+.column { flex: 1; min-width: 200px; overflow-wrap: break-word; }
+
+.highlight-box, .red-box, .green-box, .blue-box, .purple-box {
+  padding: 12px; margin-bottom: 12px; box-sizing: border-box; max-width: 100%; overflow-wrap: break-word;
+}
+.highlight-box { background: #fff3cd; border-left: 5px solid #ffc107; padding: 15px; margin: 10px 0; border-radius: 4px; }
+.red-box    { background: #f8d7da; border-left: 5px solid #dc3545; }
+.green-box  { background: #d4edda; border-left: 5px solid #28a745; }
+.blue-box   { background: #d1ecf1; border-left: 5px solid #17a2b8; }
+.purple-box { background: #e8daef; border-left: 5px solid #6366f1; }
+
+.timer {
+  position: absolute; top: 20px; right: 40px; background: #ff6b6b; color: white;
+  padding: 8px 16px; border-radius: 20px; font-weight: bold;
+}
+.source {
+  position: absolute; bottom: 50px; left: 30px; right: 30px; font-size: 12px; color: #666;
+  font-style: italic; overflow: hidden; text-overflow: ellipsis;
+}
+.source a { color: var(--accent); text-decoration: none; }
+.source a:hover { text-decoration: underline; }
+
+section.divider { justify-content: center; }
+section.divider h1, section.divider h2, section.divider p { text-align: center; }
+section.divider h1 { font-size: 64px; }

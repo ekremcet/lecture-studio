@@ -1,0 +1,19 @@
+# Secrets
+.env
+.env.local
+*.cer
+*.certSigningRequest
+
+# Build output
+.build/
+dist/
+*.zip
+Sources/LectureStudio/Resources/
+web-core/dist/
+web-core/node_modules/
+node_modules/
+
+# Tooling and OS
+.DS_Store
+.swiftpm/
+**/CLAUDE.md

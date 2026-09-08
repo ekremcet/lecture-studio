@@ -1,0 +1,26 @@
+{
+  "name": "lecture-studio-web-core",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The browser-side core of Lecture Studio (Marp preview, overflow scan, CodeMirror editor, Oberik agent bridge) bundled for the macOS app's web views.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/state": "^6.7.2",
+    "@codemirror/view": "^6.43.10",
+    "@lezer/highlight": "^1.2.3",
+    "@marp-team/marp-core": "^4.4.0",
+    "@oberik/sdk": "^0.79.0",
+    "markdown-it": "^14.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
