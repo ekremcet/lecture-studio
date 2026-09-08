@@ -20,9 +20,14 @@ if (!OBERIK_PROJECT_ID || !OBERIK_PROJECT_KEY) {
 const oberik = createProjectClient({ projectId: OBERIK_PROJECT_ID, projectKey: OBERIK_PROJECT_KEY });
 
 const ORIGINS = ["http://127.0.0.1:3005"]; // the origin the Mac app's web views run under
-// Cost control: route simple turns to the cheap model, keep the large one for real work.
+// Optional cost control: route simple turns to a cheaper model and keep a larger one for real work.
+// Set OBERIK_TIER_SIMPLE, OBERIK_TIER_NORMAL and OBERIK_TIER_COMPLEX in .env to model ids your project can
+// reach (the setup prints the providers); with none of them set, the project's tiers are left alone.
 // A request that names a model (the switcher in the chat) bypasses the tiers.
-const MODEL_TIERS = { mode: "auto" as const, simple: "openai/gpt-5.6-luna", normal: "openai/gpt-5.6-sol", complex: "openai/gpt-5.6-sol" };
+const { OBERIK_TIER_SIMPLE, OBERIK_TIER_NORMAL, OBERIK_TIER_COMPLEX } = process.env;
+const MODEL_TIERS = OBERIK_TIER_SIMPLE || OBERIK_TIER_NORMAL || OBERIK_TIER_COMPLEX
+  ? { mode: "auto" as const, simple: OBERIK_TIER_SIMPLE ?? OBERIK_TIER_NORMAL ?? OBERIK_TIER_COMPLEX!, normal: OBERIK_TIER_NORMAL ?? OBERIK_TIER_COMPLEX ?? OBERIK_TIER_SIMPLE!, complex: OBERIK_TIER_COMPLEX ?? OBERIK_TIER_NORMAL ?? OBERIK_TIER_SIMPLE! }
+  : null;
 // Only what the app needs on top of the dashboard defaults. Nothing is narrowed here;
 // the minted token narrows per session.
 const CAPABILITIES = {
@@ -88,7 +93,7 @@ async function main() {
     const r = await step("register OpenAI provider", () =>
       oberik.providers.create({
         provider: "openai",
-        models: ["gpt-4o", "text-embedding-3-small"],
+        models: (process.env.OPENAI_MODELS ?? "gpt-4o,text-embedding-3-small").split(",").map((m) => m.trim()).filter(Boolean),
         values: { api_key: OPENAI_API_KEY },
         label: "openai",
       }),
@@ -98,11 +103,13 @@ async function main() {
     console.log("[!]   no OpenAI provider on the project and no OPENAI_API_KEY in .env; register one in the dashboard or add the key");
   } else console.log("[=]   OpenAI provider present");
 
-  // 4b. Model tiers
-  const tiers = await oberik.modelTiers.get();
-  const tierDiff = (Object.keys(MODEL_TIERS) as Array<keyof typeof MODEL_TIERS>).filter((k) => tiers[k] !== MODEL_TIERS[k]);
-  if (tierDiff.length) await step(`set model tiers ${JSON.stringify(MODEL_TIERS)}`, () => oberik.modelTiers.set(MODEL_TIERS));
-  else console.log("[=]   model tiers unchanged");
+  // 4b. Model tiers, only when .env names them
+  if (MODEL_TIERS) {
+    const tiers = await oberik.modelTiers.get();
+    const tierDiff = (Object.keys(MODEL_TIERS) as Array<keyof typeof MODEL_TIERS>).filter((k) => tiers[k] !== MODEL_TIERS[k]);
+    if (tierDiff.length) await step(`set model tiers ${JSON.stringify(MODEL_TIERS)}`, () => oberik.modelTiers.set(MODEL_TIERS));
+    else console.log("[=]   model tiers unchanged");
+  } else console.log("[-]   no OBERIK_TIER_* in .env; model tiers left as they are");
 
   // 5. Default model, only when asked
   if (OBERIK_DEFAULT_MODEL) {

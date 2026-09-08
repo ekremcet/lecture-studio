@@ -136,4 +136,4 @@ Issues and pull requests are welcome. Keep the Swift side in Swift 5 language mo
 
 ## License
 
-To be decided before the first public release. Until a `LICENSE` file is added, all rights are reserved.
+[MIT](LICENSE).
