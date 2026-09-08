@@ -47,9 +47,8 @@ toolchain and any editor.
 Download the DMG from the [Releases](https://github.com/ekremcet/lecture-studio/releases/latest) page or from
 [lecture.studio/download](https://lecture.studio/download/), drag **Lecture Studio** into Applications, and open it.
 
-The current builds are signed with an Apple Developer ID but not yet notarized, so macOS blocks the first launch.
-Try to open the app once, then go to **System Settings → Privacy & Security**, scroll to the message about
-Lecture Studio, and click **Open Anyway**. Later releases will be notarized.
+Builds from 0.1.1 on are signed with an Apple Developer ID and notarized by Apple, so the app opens without a
+Gatekeeper warning.
 
 Verify a download with:
 
