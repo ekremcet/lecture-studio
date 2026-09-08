@@ -236,7 +236,7 @@ struct EditLectureSheet: View {
                 ? "The title and event are shown in the studio and saved in \(store.course)/studio.json. The deck itself is not changed; ask the agent for that."
                 : "The title and code are shown in the studio and saved in \(store.course)/studio.json. Deck headers are not changed; ask the agent for that.")
             HStack(alignment: .top, spacing: 12) {
-                if !talk { LabeledField(label: "Code") { TextField("YZM2031", text: $code).onChange(of: code) { _, v in code = v.uppercased() } }.frame(width: 140) }
+                if !talk { LabeledField(label: "Code") { TextField("CS231", text: $code).onChange(of: code) { _, v in code = v.uppercased() } }.frame(width: 140) }
                 LabeledField(label: "Title") { TextField(talk ? "AI in Science" : "Data Structures and Algorithms", text: $title) }
             }
             HStack(alignment: .top, spacing: 12) {

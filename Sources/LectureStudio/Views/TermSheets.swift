@@ -24,7 +24,7 @@ struct NewTermSheet: View {
                 LabeledField(label: "First lecture", hint: "\(word.capFirst) 1 gets this date; \(word) N is \(word) 1 plus N-1 weeks.") { DatePicker("", selection: $startDate, displayedComponents: .date).labelsHidden() }
             }
             LabeledField(label: "New folder", hint: "Inside the library. Lowercase letters, digits, dots, dashes.") {
-                TextField("yzm2021-fall26", text: $folder).font(.system(.body, design: .monospaced)).onChange(of: folder) { _, v in folderEdited = !v.isEmpty && v != suggested(term) }
+                TextField("cs221-fall26", text: $folder).font(.system(.body, design: .monospaced)).onChange(of: folder) { _, v in folderEdited = !v.isEmpty && v != suggested(term) }
             }
             Toggle("Copy the \(word)s and their decks (off: only the syllabus, context and sources)", isOn: $copyUnits)
             Toggle("Archive \(from) afterwards", isOn: $archiveOld)
@@ -44,7 +44,7 @@ struct NewTermSheet: View {
 
     @State private var folderEdited = false
 
-    /// "yzm2021-fall25" + "Fall 2026" -> "yzm2021-fall26"; otherwise "<folder>-<term>".
+    /// "cs221-fall25" + "Fall 2026" -> "cs221-fall26"; otherwise "<folder>-<term>".
     func suggested(_ t: String) -> String {
         let termSlug = slug(t.replacingOccurrences(of: "20", with: "").replacingOccurrences(of: " ", with: ""))
         if termSlug.isEmpty { return "" }

@@ -1,6 +1,6 @@
 /* @theme ytu-talk */
 /*
- * The style family used by talks (seminar-ai-in-science, startup-presentation, yzm4015
+ * The style family used by talks (seminars, startup pitches, workshops
  * workshops): 22px base, colored h1, colored boxes, an absolute .source footer and a .timer badge.
  * The accent color is a custom property so a deck can override it in one line:
  *   <style> :root { --accent: #6366f1; } </style>

@@ -30,7 +30,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "list_dir",
     description: "List one directory of the LECTURE REPO (not the sandbox). Path is relative to the repo root; use '.' for the root. Returns name, kind, size.",
-    parameters: { type: "object", properties: { path: { type: "string", description: "repo-relative directory, e.g. 'yzm2021-fall26/week3'" } }, required: ["path"] },
+    parameters: { type: "object", properties: { path: { type: "string", description: "repo-relative directory, e.g. 'cs221-fall26/week3'" } }, required: ["path"] },
   },
   {
     name: "read_file",
@@ -72,7 +72,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     parameters: {
       type: "object",
       properties: {
-        week_dir: { type: "string", description: "e.g. 'yzm2021-fall26/week3'" },
+        week_dir: { type: "string", description: "e.g. 'cs221-fall26/week3'" },
         filename: { type: "string", description: "kebab-case with extension, e.g. 'waterfall-meme.jpg'" },
         source: { type: "string", description: "https URL or data:image/...;base64,..." },
       },

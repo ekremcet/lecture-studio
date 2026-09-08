@@ -33,7 +33,7 @@ public struct LectureMeta: Codable, Equatable, Sendable {
     public var language: String?
     /// Archived courses stay in the library but drop to the bottom of the picker; the agent leaves them alone.
     public var archived: Bool?
-    /// The folder this term was copied from ("yzm2021-fall25"), for comparisons.
+    /// The folder this term was copied from ("cs221-fall25"), for comparisons.
     public var derivedFrom: String?
     /// First lecture, ISO date (yyyy-MM-dd); unit dates count weekly from here.
     public var startDate: String?

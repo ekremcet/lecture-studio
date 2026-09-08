@@ -23,7 +23,7 @@ final class StudioCoreTests: XCTestCase {
     }
 
     func testLabels() {
-        XCTAssertEqual(Labels.courseLabel("yzm2031-data-structures"), "YZM2031 Data Structures")
+        XCTAssertEqual(Labels.courseLabel("cs231-data-structures"), "CS231 Data Structures")
         XCTAssertEqual(Labels.courseLabel("ai-in-science"), "Ai In Science")
         XCTAssertEqual(Labels.courseLabel("x", LectureMeta(title: "Talk", code: "")), "Talk")
         XCTAssertEqual(Labels.unitLabel("week3"), "Week 3")
