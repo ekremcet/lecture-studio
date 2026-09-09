@@ -4,43 +4,6 @@ import StudioCore
 
 /// Conversation state that outlives the chat panel: panels hide and show while a turn streams.
 /// The stream events arrive from the agent bridge.
-struct ChatAttachment: Codable, Equatable, Identifiable {
-    var id: String?
-    var kind: String
-    var url: String
-    var name: String?
-    var mime_type: String?
-    var isImage: Bool { kind == "image" || (name ?? "").range(of: "\\.(png|jpe?g|gif|webp|svg)$", options: [.regularExpression, .caseInsensitive]) != nil }
-    private enum CodingKeys: String, CodingKey { case id, kind, url, name, mime_type }
-}
-
-struct ChatCitation: Codable, Equatable {
-    var marker: Int?
-    var kind: String?
-    var title: String?
-    var quote: String?
-    var filename: String?
-    var page: Int?
-    var label: String { (title ?? filename ?? kind ?? "source") }
-}
-
-struct ChatTodo: Codable, Equatable, Identifiable {
-    var id: String
-    var content: String
-    var status: String
-}
-
-struct ChatMessage: Identifiable, Equatable {
-    enum Role { case user, assistant }
-    let id = UUID()
-    var role: Role
-    var content: String
-    var events: [String] = []
-    var attachments: [ChatAttachment] = []
-    var citations: [ChatCitation] = []
-    var error: String?
-}
-
 struct ApprovalRequest: Codable, Equatable {
     var tool_call_id: String
     var action: String
@@ -72,6 +35,10 @@ struct PendingQuestions: Codable, Equatable {
 @MainActor @Observable
 final class Conversation {
     let key: String
+    /// Identity in the archive: `New` starts another id, the history list opens an older one.
+    var id = UUID()
+    var created = Date()
+    var updated = Date()
     var messages: [ChatMessage] = []
     var todos: [ChatTodo] = []
     var sessionId: String?
@@ -88,9 +55,28 @@ final class Conversation {
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     static let flushInterval: Duration = .milliseconds(80)
 
-    init(key: String) {
-        self.key = key
-        sessionId = AppSettings.sessionId(for: key)
+    init(key: String) { self.key = key }
+
+    var title: String { ArchivedChat.title(for: messages) }
+
+    /// The conversation as the archive keeps it.
+    func archived() -> ArchivedChat {
+        ArchivedChat(id: id, scope: key, sessionId: sessionId, title: title, created: created, updated: updated, messages: messages)
+    }
+
+    /// Shows an archived conversation; its Oberik session continues from the next message.
+    func restore(_ a: ArchivedChat) {
+        flushTask?.cancel()
+        flushTask = nil
+        pending.clear()
+        id = a.id
+        created = a.created
+        updated = a.updated
+        sessionId = a.sessionId
+        messages = a.messages
+        todos = []
+        approval = nil
+        question = nil
     }
 
     /// Changes the last message. Patches queue in order and land on the next tick; `now` lands the
@@ -118,11 +104,14 @@ final class Conversation {
         }
     }
 
+    /// Starts a new conversation (the old one stays in the archive).
     func reset() {
         flushTask?.cancel()
         flushTask = nil
         pending.clear()
-        AppSettings.setSessionId(nil, for: key)
+        id = UUID()
+        created = Date()
+        updated = created
         messages = []
         todos = []
         sessionId = nil

@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var input = ""
     @State private var pending: [PendingAttachment] = []
     @State private var dropTarget = false
+    @State private var historyOpen = false
 
     var scope: ChatScope { scopes.first { $0.key == scopeKey } ?? scopes[0] }
 
@@ -40,9 +41,14 @@ struct ChatView: View {
             if scopes.count > 1 {
                 Picker("", selection: $scopeKey) { ForEach(scopes) { Text($0.label).tag($0.key) } }.labelsHidden().controlSize(.small).fixedSize().help("Which conversation: this unit or the whole course")
             }
-            Text(conv.sessionId.map { String($0.prefix(8)) } ?? "new").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(conv.messages.isEmpty ? "New conversation" : conv.title).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             Spacer()
-            Button { store.resetConversation(scope.key) } label: { Label("New", systemImage: "arrow.counterclockwise") }.controlSize(.small).buttonStyle(.plain).help("Start a new conversation")
+            Button { historyOpen.toggle() } label: { Label("History", systemImage: "clock.arrow.circlepath") }
+                .controlSize(.small).buttonStyle(.plain)
+                .disabled(conv.running)
+                .help(conv.running ? "Earlier conversations open once this reply has finished" : "Earlier conversations of this \(scopes.count > 1 && scope.key == scopes[0].key ? "unit" : "course")")
+                .popover(isPresented: $historyOpen, arrowEdge: .bottom) { ChatHistoryList(scope: scope, current: conv.id) { historyOpen = false } }
+            Button { store.resetConversation(scope.key) } label: { Label("New", systemImage: "plus.bubble") }.controlSize(.small).buttonStyle(.plain).help("Start a new conversation (this one stays in the history)")
         }
         .padding(.horizontal, 8).frame(height: 32)
     }
@@ -70,26 +76,45 @@ struct ChatView: View {
 
     // The transcript is the hot path while a reply streams: every change of the last message
     // re-renders this. Rows are Equatable, so only the streaming row's body and layout run per
-    // tick; the others keep their cached size (see MessageRow). The stack is lazy so rows out of
-    // view are not rendered at all: a plain stack rebuilt the display list of every long reply on
-    // each tick. The scroll view keeps the bottom in view while content grows (a reply streams,
-    // or changes from plain text to markdown at the end of the turn) as long as the reader is at
-    // the bottom; scrolling up stops that, as in any chat.
+    // tick (see MessageRow), and a finished reply is one native text view (RichText), so the
+    // display list stays a few items per row. A plain stack, so scrolling to the end is exact: a
+    // lazy stack estimated tall rows and cut their ends off. The scroll view keeps the bottom in view
+    // while content grows (a reply streams, or changes from plain text to markdown at the end of
+    // the turn) as long as the reader is at the bottom; scrolling up stops that, as in any chat.
     func messages(_ conv: Conversation) -> some View {
         let lastId = conv.messages.last?.id
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if conv.messages.isEmpty { emptyState }
-                    ForEach(conv.messages) { m in
-                        MessageRow(message: m, streaming: conv.running && m.role == .assistant && m.id == lastId).equatable()
+                VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if conv.messages.isEmpty { emptyState }
+                        ForEach(conv.messages) { m in
+                            MessageRow(message: m, streaming: conv.running && m.role == .assistant && m.id == lastId).equatable()
+                        }
                     }
+                    .padding(12)
+                    // The very end of the content, outside the padding: a scroll to it lands exactly at the
+                    // edge, which is what the size-change anchor below needs to keep following.
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .padding(12)
             }
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
-            .onChange(of: conv.messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            // A new message: to the end now, and once more after the rows have settled, so the reply
+            // that follows grows in view (the size-change anchor holds only from the bottom).
+            .onChange(of: conv.messages.count) { _, _ in
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                Task { @MainActor in
+                    for wait in [150, 300, 500] { try? await Task.sleep(for: .milliseconds(wait)); proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+            }
+            // Another conversation (History, New) gets a fresh scroll view that opens at its end: the
+            // old one kept its offset from a long transcript and showed nothing of a short one.
+            .id(conv.id)
+            .task(id: conv.id) {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
         }
     }
 
@@ -222,8 +247,11 @@ struct MessageRow: View, Equatable {
         VStack(alignment: user ? .trailing : .leading, spacing: 6) {
             if streaming {
                 if !message.content.isEmpty { bubble(StreamingText(message.content), user: user) }
-            } else {
-                bubble(MarkdownText(message.content, plain: user).textSelection(.enabled), user: user)
+            } else if user {
+                bubble(Text(message.content).textSelection(.enabled), user: true)
+            } else if !message.content.isEmpty {
+                // Empty otherwise only when a turn never finished (the app quit mid-reply): no bubble then.
+                bubble(RichText(text: message.content), user: false)
             }
             if streaming {
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text(Activity.describe(message.events)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
@@ -270,6 +298,53 @@ struct MessageRow: View, Equatable {
             .background(user ? Color.accentColor : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
             .foregroundStyle(user ? Color.white : Color.primary)
             .frame(maxWidth: 520, alignment: user ? .trailing : .leading)
+    }
+}
+
+/// The earlier conversations of one scope, newest first. Each course and each unit keeps its own list;
+/// the current one is marked, a click shows another, the trash removes one for good.
+struct ChatHistoryList: View {
+    @Environment(StudioStore.self) private var store
+    var scope: ChatScope
+    var current: UUID
+    var onOpen: () -> Void
+    @State private var items: [ChatSummary] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(scope.label).font(.caption.weight(.medium)).lineLimit(1)
+                Spacer()
+                Text("\(items.count) conversation\(items.count == 1 ? "" : "s")").font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            Divider()
+            if items.isEmpty {
+                Text("No conversations yet. The first message starts one; New keeps it here and opens another.")
+                    .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .padding(20).frame(maxWidth: .infinity)
+            } else {
+                List(items) { item in
+                    HStack(spacing: 8) {
+                        Image(systemName: item.id == current ? "bubble.left.fill" : "bubble.left").font(.caption).foregroundStyle(item.id == current ? Color.accentColor : .secondary).frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title.isEmpty ? "Untitled" : item.title).lineLimit(1)
+                            Text("\(item.updated.formatted(.relative(presentation: .named))) · \(item.messageCount) message\(item.messageCount == 1 ? "" : "s")").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button { store.deleteChat(scope.key, id: item.id); items = store.chatHistory(scope.key) } label: { Image(systemName: "trash") }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).help("Delete this conversation")
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { store.openChat(scope.key, id: item.id); onOpen() }
+                    .listRowSeparator(.hidden)
+                }
+                .listStyle(.plain)
+                .frame(minHeight: 120, maxHeight: 360)
+            }
+        }
+        .frame(width: 340)
+        .onAppear { items = store.chatHistory(scope.key) }
     }
 }
 
@@ -398,47 +473,6 @@ struct StreamingText: View {
         }
     }
 }
-
-/// Markdown as the chat shows it: paragraphs, bullet and numbered lists, headings, fenced code, with
-/// inline bold/italic/code/links. Assistant replies are markdown; the user's own text stays as typed.
-/// The parse comes from `ChatMarkdown.cached`, never from this body: the body runs on every
-/// transcript change, the parse once per text.
-struct MarkdownText: View {
-    let text: String
-    let plain: Bool
-    init(_ text: String, plain: Bool = false) { self.text = text; self.plain = plain }
-
-    var body: some View {
-        if plain {
-            Text(text)
-        } else {
-            let blocks = ChatMarkdown.cached(text)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in
-                    switch b {
-                    case .paragraph(let p): Text(p)
-                    case .heading(let level, let h): Text(h).font(level <= 2 ? .headline : .subheadline.weight(.semibold))
-                    case .bullet(let items):
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(items.enumerated()), id: \.offset) { _, it in
-                                HStack(alignment: .top, spacing: 6) { Text("•"); Text(it) }
-                            }
-                        }
-                    case .numbered(let items):
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(items.enumerated()), id: \.offset) { i, it in
-                                HStack(alignment: .top, spacing: 6) { Text("\(i + 1).").monospacedDigit(); Text(it) }
-                            }
-                        }
-                    case .code(let c):
-                        Text(c).font(.system(.caption, design: .monospaced)).padding(6).frame(maxWidth: .infinity, alignment: .leading).background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-            }
-        }
-    }
-}
-
 
 /// One human line for what the agent is doing right now, from the last step it reported. The raw
 /// steps stay behind the "N steps" disclosure for whoever wants them.

@@ -309,3 +309,55 @@ final class ChatStreamTests: XCTestCase {
         XCTAssertFalse(q.drain(into: &value))
     }
 }
+
+/// Conversations on disk: one file each, per library and per scope, newest first.
+final class ChatArchiveTests: XCTestCase {
+    func testSaveListLoadDeletePerScope() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("chat-archive-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = URL(fileURLWithPath: "/tmp/lectures")
+        let archive = ChatArchive.forRepo(repo, base: base)
+        XCTAssertTrue(archive.root.lastPathComponent.hasPrefix("lectures-"))
+        XCTAssertEqual(ChatArchive.forRepo(repo, base: base).root, archive.root)
+        XCTAssertNotEqual(ChatArchive.forRepo(URL(fileURLWithPath: "/tmp/other/lectures"), base: base).root, archive.root)
+
+        var m1 = ChatMessage(role: .user, content: "Plan week 3\nwith three readings")
+        m1.attachments = [ChatAttachment(kind: "file", url: "data:text/plain;base64,aGk=", name: "notes.txt", mime_type: "text/plain")]
+        var m2 = ChatMessage(role: .assistant, content: "Here is the **plan**.")
+        m2.events = ["▶ list_sources {}", "✓ list_sources"]
+        m2.citations = [ChatCitation(marker: 1, title: "Reading A", page: 4)]
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let older = ArchivedChat(id: UUID(), scope: "cs101/week3", sessionId: "s-1", title: ArchivedChat.title(for: [m1, m2]), created: t0, updated: t0, messages: [m1, m2])
+        // Saved within the same second as `older`: the fraction still orders them.
+        let newer = ArchivedChat(id: UUID(), scope: "cs101/week3", sessionId: nil, title: "second", created: t0 + 0.25, updated: t0 + 0.5, messages: [ChatMessage(role: .user, content: "second")])
+        let course = ArchivedChat(id: UUID(), scope: "cs101", sessionId: "s-2", title: "course", created: t0, updated: t0, messages: [ChatMessage(role: .user, content: "course-level")])
+        try archive.save(older); try archive.save(newer); try archive.save(course)
+
+        XCTAssertEqual(older.title, "Plan week 3")
+        let week = archive.list(scope: "cs101/week3")
+        XCTAssertEqual(week.map(\.id), [newer.id, older.id])
+        XCTAssertEqual(week.map(\.messageCount), [1, 2])
+        XCTAssertEqual(archive.list(scope: "cs101").map(\.id), [course.id])
+        XCTAssertEqual(archive.list(scope: "cs101/week4"), [])
+        XCTAssertEqual(archive.latest(scope: "cs101/week3")?.id, newer.id)
+
+        let back = try XCTUnwrap(archive.load(scope: "cs101/week3", id: older.id))
+        XCTAssertEqual(back, older)
+        XCTAssertEqual(back.messages[1].citations.first?.label, "Reading A")
+        XCTAssertEqual(back.messages[0].attachments.first?.name, "notes.txt")
+
+        try archive.delete(scope: "cs101/week3", id: newer.id)
+        XCTAssertEqual(archive.list(scope: "cs101/week3").map(\.id), [older.id])
+        XCTAssertNil(archive.load(scope: "cs101/week3", id: newer.id))
+        try archive.delete(scope: "cs101/week3", id: newer.id)  // gone already: no error
+        XCTAssertEqual(archive.folder(scope: "").lastPathComponent, "_")
+        XCTAssertEqual(archive.folder(scope: "cs101/week3").lastPathComponent, "cs101__week3")
+    }
+
+    func testTitleOfEmptyOrLong() {
+        XCTAssertEqual(ArchivedChat.title(for: []), "")
+        XCTAssertEqual(ArchivedChat.title(for: [ChatMessage(role: .assistant, content: "hi")]), "")
+        let long = String(repeating: "x", count: 100)
+        XCTAssertEqual(ArchivedChat.title(for: [ChatMessage(role: .user, content: long)]).count, 72)
+    }
+}

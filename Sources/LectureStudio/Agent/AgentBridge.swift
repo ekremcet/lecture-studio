@@ -83,8 +83,9 @@ final class AgentBridge: NSObject {
         }
     }
 
-    static func debug(_ s: String) {
-        if ProcessInfo.processInfo.environment["STUDIO_DEBUG"] != nil { FileHandle.standardError.write(Data("[agent] \(s)\n".utf8)) }
+    static let debugEnabled = ProcessInfo.processInfo.environment["STUDIO_DEBUG"] != nil
+    static func debug(_ s: @autoclosure () -> String) {
+        if debugEnabled { FileHandle.standardError.write(Data("[agent] \(s())\n".utf8)) }
     }
 
     /// Load the page once the credentials exist; a reload picks up changed settings.

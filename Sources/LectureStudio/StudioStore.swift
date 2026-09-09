@@ -603,11 +603,45 @@ final class StudioStore {
 
     // MARK: chat
 
+    /// The conversation of a scope. The first time a scope is asked for, the newest archived conversation
+    /// of that scope comes back (its session continues); before the archive existed the session id lived in
+    /// the defaults, and that still seeds a conversation with no archive.
     func conversation(_ key: String) -> Conversation {
         if let c = conversations[key] { return c }
         let c = Conversation(key: key)
+        if let a = archive?.latest(scope: key) { c.restore(a) } else { c.sessionId = AppSettings.sessionId(for: key) }
         conversations[key] = c
         return c
+    }
+
+    /// The chat archive of the open library folder. `STUDIO_CHAT_ARCHIVE=/dir` moves it (smoke runs keep
+    /// their synthetic conversations out of the real history).
+    var archive: ChatArchive? {
+        repo.map { ChatArchive.forRepo($0.root, base: ProcessInfo.processInfo.environment["STUDIO_CHAT_ARCHIVE"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }) }
+    }
+
+    /// Writes the conversation to the archive; empty conversations are not kept.
+    func saveConversation(_ conv: Conversation) {
+        guard !conv.messages.isEmpty, let archive else { return }
+        conv.updated = Date()
+        do { try archive.save(conv.archived()) } catch { toasts.error("Could not save the conversation", error) }
+    }
+
+    /// Earlier conversations of a scope, newest first.
+    func chatHistory(_ key: String) -> [ChatSummary] { archive?.list(scope: key) ?? [] }
+
+    /// Shows an earlier conversation of the scope. Not while a turn streams into the current one.
+    func openChat(_ key: String, id: UUID) {
+        let conv = conversation(key)
+        guard !conv.running, conv.id != id, let a = archive?.load(scope: key, id: id) else { return }
+        conv.restore(a)
+    }
+
+    func deleteChat(_ key: String, id: UUID) {
+        let conv = conversation(key)
+        guard !(conv.running && conv.id == id) else { return }
+        do { try archive?.delete(scope: key, id: id) } catch { toasts.error("Could not delete the conversation", error) }
+        if conv.id == id { conv.reset() }
     }
 
     private var who: String {
@@ -675,6 +709,7 @@ final class StudioStore {
         userMsg.attachments = attachments.map { ChatAttachment(id: nil, kind: $0.isImage ? "image" : "file", url: $0.url.absoluteString, name: $0.name, mime_type: $0.mime) }
         conv.messages.append(userMsg)
         conv.messages.append(ChatMessage(role: .assistant, content: ""))
+        saveConversation(conv)
         let id = UUID().uuidString
         conv.turnId = id
         do {
@@ -692,9 +727,12 @@ final class StudioStore {
         Task { await agent.cancel(id: id) }
     }
 
+    /// `New`: the current conversation stays in the archive; the next message starts another session.
     func resetConversation(_ key: String) {
         cancelTurn(key)
-        conversation(key).reset()
+        let conv = conversation(key)
+        saveConversation(conv)
+        conv.reset()
     }
 
     func setModel(_ m: String) {
@@ -741,10 +779,7 @@ final class StudioStore {
             conv.question = decodeBridge(PendingQuestions.self, d["pending"])
         case "done":
             let r = d["result"] as? [String: Any] ?? [:]
-            if let sid = r["session_id"] as? String, !sid.isEmpty {
-                conv.sessionId = sid
-                AppSettings.setSessionId(sid, for: conv.key)
-            }
+            if let sid = r["session_id"] as? String, !sid.isEmpty { conv.sessionId = sid }
             let content = r["content"] as? String ?? ""
             let atts = decodeBridge([ChatAttachment].self, r["attachments"]) ?? []
             let cits = decodeBridge([ChatCitation].self, r["citations"]) ?? []
@@ -770,6 +805,7 @@ final class StudioStore {
         conv.turnId = nil
         conv.approval = nil
         conv.question = nil
+        saveConversation(conv)
     }
 
     func answerApproval(_ conv: Conversation, approved: Bool) {

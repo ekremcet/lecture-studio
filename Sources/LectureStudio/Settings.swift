@@ -70,11 +70,8 @@ enum AppSettings {
         get { defaults.string(forKey: "lastFile") ?? "" }
         set { defaults.set(newValue, forKey: "lastFile") }
     }
+    /// Where the session id lived before the chat archive (0.1.3); seeds a scope that has no archived conversation.
     static func sessionId(for key: String) -> String? { defaults.string(forKey: "oberik-session:\(key.isEmpty ? "_" : key)") }
-    static func setSessionId(_ id: String?, for key: String) {
-        let k = "oberik-session:\(key.isEmpty ? "_" : key)"
-        if let id { defaults.set(id, forKey: k) } else { defaults.removeObject(forKey: k) }
-    }
 
     /// The project root of this checkout, when the app runs from `swift run` inside it.
     static var devProjectRoot: URL? {

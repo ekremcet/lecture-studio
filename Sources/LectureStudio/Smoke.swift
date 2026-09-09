@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SwiftUI
 import StudioCore
 
 /// Development aid: `STUDIO_SMOKE=/dir` walks the screens against the open repo without clicking,
@@ -141,6 +142,7 @@ enum Smoke {
                     conv.messages.append(ChatMessage(role: .user, content: "earlier question \(i)"))
                     conv.messages.append(ChatMessage(role: .assistant, content: reply))
                 }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)  // the transcript settles, as before a real send
                 conv.messages.append(ChatMessage(role: .user, content: "stream test"))
                 conv.messages.append(ChatMessage(role: .assistant, content: ""))
                 conv.running = true
@@ -159,6 +161,33 @@ enum Smoke {
                 try? await Task.sleep(nanoseconds: 700_000_000)
                 note("stream: chars=\(reply.count) steps=\(steps) wall=\(String(format: "%.1f", Date().timeIntervalSince(t0)))s cpu=\(String(format: "%.2f", Smoke.cpuSeconds() - cpu0))s stalls=\(mainThreadStalls)")
                 await Snapshot.capture(to: out.appendingPathComponent("stream"))
+                // The archive round trip: the conversation is on disk, listed for this scope only, and comes back whole.
+                store.saveConversation(conv)
+                let history = store.chatHistory(scope.key)
+                let back = store.archive?.load(scope: scope.key, id: conv.id)
+                note("history: scope=\(scope.key) count=\(history.count) first=\(history.first?.title ?? "-") restored=\(back?.messages == conv.messages) courseScope=\(store.chatHistory(store.lectureScope.key).count)")
+                // A second, older conversation so the list has two rows; then the list itself in a window for the snapshot.
+                store.resetConversation(scope.key)
+                conv.messages.append(ChatMessage(role: .user, content: "Draft the speaker notes for slides 4 to 9, two sentences each"))
+                conv.messages.append(ChatMessage(role: .assistant, content: "Done: nine notes added."))
+                store.saveConversation(conv)
+                let list = ChatHistoryList(scope: scope, current: conv.id, onOpen: {}).environment(store)
+                let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+                w.title = "History"
+                w.contentView = NSHostingView(rootView: list)
+                w.center(); w.orderFront(nil)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                let shot = Process()
+                shot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                shot.arguments = ["-x", "-o", "-l", String(w.windowNumber), out.appendingPathComponent("history-list.png").path]
+                try? shot.run(); shot.waitUntilExit()
+                await Snapshot.capture(to: out.appendingPathComponent("history"))
+                w.orderOut(nil)
+                // Back to the long one from the list: it opens at its end.
+                if let older = store.chatHistory(scope.key).first(where: { $0.id != conv.id }) { store.openChat(scope.key, id: older.id) }
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
+                note("history: reopened=\(conv.messages.count) messages, title=\(conv.title)")
+                await Snapshot.capture(to: out.appendingPathComponent("history-open"))
             }
             if ProcessInfo.processInfo.environment["STUDIO_SMOKE_HOME"] == "1" { store.backToLectures(); try? await Task.sleep(nanoseconds: 3_000_000_000) }
             note("done")

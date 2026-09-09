@@ -33,6 +33,8 @@ toolchain and any editor.
   cites them under the answer instead of writing from memory.
 - **Notes, questions, guide.** Speaker notes slide by slide, retrieval questions, and an instructor guide from the
   same conversation.
+- **Conversations stay.** Every course and every unit keeps its own chat history on your Mac; reopen an earlier
+  conversation from the History button and carry on where it left off.
 - **Courses across terms.** A course is a folder of numbered units. New terms copy the old one and redate it;
   terms can be compared unit by unit.
 - **Presenter mode.** Audience window plus a presenter window with notes, the next slide, and a break countdown.
