@@ -46,7 +46,8 @@ struct WorkspaceView: View {
                 HStack(spacing: 4) { Image(systemName: "book"); Text("Sources"); if store.sourceCount > 0 { Chip(text: "\(store.sourceCount)", filled: true) } }
             }.controlSize(.small).help(store.talk ? "Source materials for this talk" : "Source materials for this course and \(store.word)")
             if store.dirty { Chip(text: "Unsaved") }
-            if store.staleOnDisk { Button("Changed on disk, reload") { store.reloadFromDisk() }.controlSize(.small).help("The agent changed this file on disk while you had unsaved edits.") }
+            if store.staleOnDisk { Button("Changed on disk, reload") { store.reloadFromDisk() }.controlSize(.small).help("This file changed on disk (the assistant, another app, a pull) while you had unsaved edits.") }
+            Button { Task { await store.refreshLibrary() } } label: { Image(systemName: "arrow.clockwise") }.controlSize(.small).help("Read the library folder again (⌘R). Changes from other apps normally show up on their own.")
             Spacer()
             if store.isText {
                 Button { Task { await store.save() } } label: { Label("Save ⌘S", systemImage: "square.and.arrow.down") }.controlSize(.small).disabled(!store.dirty).buttonStyle(store.dirty ? .prominent : .plainBordered)

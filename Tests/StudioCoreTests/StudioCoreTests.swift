@@ -310,6 +310,31 @@ final class ChatStreamTests: XCTestCase {
     }
 }
 
+/// The library folder is watched for changes made by other processes.
+final class FolderWatcherTests: XCTestCase {
+    func testReportsWritesFromAnotherProcessRelativeToTheRoot() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("watch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("week1"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let exp = expectation(description: "external change reported")
+        exp.assertForOverFulfill = false
+        var got: [String] = []
+        let w = FolderWatcher(root: dir, latency: 0.1, quiet: 0.3) { paths in got = paths; exp.fulfill() }
+        w.start()
+        defer { w.stop() }
+        Thread.sleep(forTimeInterval: 0.3)
+        // Another process writes (the watcher ignores this process's own writes, as the app's are handled elsewhere).
+        let sh = Process()
+        sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+        sh.arguments = ["-c", "echo '# hi' > '\(dir.path)/week1/deck.md'; echo x > '\(dir.path)/.git/index'"]
+        try sh.run(); sh.waitUntilExit()
+        wait(for: [exp], timeout: 8)
+        XCTAssertTrue(got.contains { $0 == "week1/deck.md" || $0 == "week1" }, "\(got)")
+        XCTAssertFalse(got.contains { $0.hasPrefix(".git") }, "\(got)")
+    }
+}
+
 /// Conversations on disk: one file each, per library and per scope, newest first.
 final class ChatArchiveTests: XCTestCase {
     func testSaveListLoadDeletePerScope() throws {

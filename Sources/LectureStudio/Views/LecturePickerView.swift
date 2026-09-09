@@ -77,6 +77,7 @@ struct LecturePickerView: View {
                         Button { pickImport() } label: { Label("Import…", systemImage: "square.and.arrow.down") }.help("Bring an existing course folder or a deck file into the library")
                         Button { store.dialog = .sources } label: { Label("Shared sources", systemImage: "book") }.help("Sources every lecture and talk can use")
                         Button { store.dialog = .profile } label: { Label(store.profileExists == true ? (store.profile?.name ?? "Profile") : "Set up your profile", systemImage: "person") }.help("Name, contact lines, teaching style")
+                        Button { Task { await store.refreshLibrary() } } label: { Image(systemName: "arrow.clockwise") }.help("Read the library folder again (⌘R). Changes from other apps normally show up on their own.")
                     }
                 }
                 if let c = store.checklist { GettingStartedView(state: c) }

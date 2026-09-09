@@ -151,6 +151,18 @@ enum Smoke {
                 note("chat: running=\(conv.running) session=\(conv.sessionId ?? "-") events=\(last?.events ?? []) error=\(last?.error ?? "none")\nreply=\(last?.content ?? "")\ncitations=\(last?.citations.count ?? 0)")
                 await Snapshot.capture(to: out.appendingPathComponent("chat"))
             }
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_WATCH"] == "1", let fs = store.repo {
+                // Another process adds a file to the library: the watcher must bring it into the list without a relaunch.
+                // Only against a scratch copy of a library: this writes into the repo folder.
+                let before = store.files.count
+                let sh = Process()
+                sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+                let rel = "\(store.course)/watch-test/watch-test-slides.md"
+                sh.arguments = ["-c", "mkdir -p '\(fs.root.path)/\(store.course)/watch-test' && printf -- '---\nmarp: true\n---\n# Watched\n' > '\(fs.root.path)/\(rel)'"]
+                try? sh.run(); sh.waitUntilExit()
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                note("watch: before=\(before) after=\(store.files.count) listed=\(store.files.contains { $0.path == rel })")
+            }
             if ProcessInfo.processInfo.environment["STUDIO_SMOKE_STREAM"] == "1", let scope = store.weekScope {
                 // A long markdown reply, streamed the way the bridge delivers it (the whole text so far, about
                 // twelve posts a second). The transcript re-rendered and re-laid-out everything per post before

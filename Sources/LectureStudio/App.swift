@@ -29,6 +29,8 @@ struct LectureStudioApp: App {
             // Menus follow the screen: View and Present exist only in the workspace.
             if store.stage == .work {
                 CommandMenu("View") {
+                    Button("Refresh Library") { Task { await store.refreshLibrary() } }.keyboardShortcut("r", modifiers: .command)
+                    Divider()
                     ForEach(PanelId.allCases) { p in
                         Toggle(p.rawValue.capFirst, isOn: Binding(get: { !store.hiddenPanels.contains(p) }, set: { _ in store.togglePanel(p) }))
                             .keyboardShortcut(KeyEquivalent(Character(String(PanelId.allCases.firstIndex(of: p)! + 1))), modifiers: [.command, .option])

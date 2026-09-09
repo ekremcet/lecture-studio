@@ -141,8 +141,14 @@ final class StudioStore {
         return .work
     }
 
+    /// Reports changes made to the library outside the app (see FolderWatcher).
+    @ObservationIgnored private var watcher: FolderWatcher?
+
     func openRepo(_ url: URL) {
         repo = RepoFS(root: url)
+        watcher?.stop()
+        watcher = FolderWatcher(root: url) { [weak self] paths in self?.externalChanges(paths) }
+        watcher?.start()
         AppSettings.repoPath = url.path
         course = ""
         unit = nil
@@ -200,6 +206,27 @@ final class StudioStore {
             await checkGit()
             toasts.success("Git initialized", fs.root.lastPathComponent)
         } catch { toasts.error("Could not initialize git", error) }
+    }
+
+    /// Changes on disk that did not come from this app: the file list, the profile, the git state and,
+    /// when it is the open file, the editor (or a "reload" notice when there are unsaved edits).
+    private func externalChanges(_ paths: [String]) {
+        Task { await refreshFiles() }
+        if paths.contains(where: { $0 == "studio.json" }) { Task { await loadProfile() } }
+        if !filePath.isEmpty, paths.contains(where: { $0 == filePath || filePath.hasPrefix($0 + "/") }) {
+            if dirty { staleOnDisk = true } else { Task { await openFile(filePath, select: false) } }
+        }
+        if gitAvailable { Task { await checkGit() } }
+    }
+
+    /// The Refresh button and ⌘R: everything the watcher would report, on demand.
+    func refreshLibrary() async {
+        await refreshFiles()
+        await loadProfile()
+        if gitAvailable { await checkGit() }
+        if !filePath.isEmpty {
+            if dirty { staleOnDisk = (try? repo?.readString(filePath)) != editorText } else { await openFile(filePath, select: false) }
+        }
     }
 
     func refreshFiles() async {
