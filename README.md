@@ -16,6 +16,10 @@
   <a href="https://lecture.studio/blog/">Guides</a>
 </p>
 
+<p align="center">
+  <a href="https://oberik.com"><img src="https://img.shields.io/badge/powered%20by-Oberik-7c6cff?labelColor=08080b" alt="Powered by Oberik"></a>
+</p>
+
 ---
 
 Lecture Studio opens a git repository of courses and talks. You drop readings, papers, notes, and old slides into
