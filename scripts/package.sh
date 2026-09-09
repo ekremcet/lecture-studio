@@ -37,8 +37,45 @@ fi
 codesign --force --deep --options runtime --timestamp --entitlements "$root/Packaging/entitlements.plist" --sign "$identity" "$app"
 codesign --verify --strict --verbose=2 "$app"
 
+# The disk image opens as the usual install window: the app on the left, a link to Applications on the
+# right, an arrow between them on a drawn background. Finder lays the window out on a writable image
+# (icon positions, view options, background live in its .DS_Store), which is then compressed.
 dmg="$out/LectureStudio-$version.dmg"
-hdiutil create -quiet -volname "Lecture Studio" -srcfolder "$app" -ov -format UDZO "$dmg"
+stage="$out/dmg-stage"
+rm -rf "$stage"; mkdir -p "$stage/.background"
+cp -R "$app" "$stage/"
+ln -s /Applications "$stage/Applications"
+swift "$root/scripts/dmg-background.swift" "$stage/.background/background.png" 560 360 >/dev/null
+rw="$out/LectureStudio-rw.dmg"
+hdiutil create -quiet -volname "Lecture Studio" -srcfolder "$stage" -ov -format UDRW -fs HFS+ "$rw"
+dev="$(hdiutil attach -readwrite -noverify -noautoopen "$rw" | grep -o '/dev/disk[0-9]*' | head -1)"
+osascript <<'EOS'
+tell application "Finder"
+  tell disk "Lecture Studio"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set pathbar visible of container window to false
+    set the bounds of container window to {200, 200, 760, 560}
+    set theViewOptions to the icon view options of container window
+    set arrangement of theViewOptions to not arranged
+    set icon size of theViewOptions to 128
+    set background picture of theViewOptions to file ".background:background.png"
+    set position of item "Lecture Studio.app" of container window to {150, 170}
+    set position of item "Applications" of container window to {410, 170}
+    close
+    open
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+EOS
+sync
+hdiutil detach "$dev" -quiet
+hdiutil convert -quiet "$rw" -format UDZO -o "$dmg" -ov
+rm -f "$rw"; rm -rf "$stage"
 codesign --force --timestamp --sign "$identity" "$dmg"
 
 if [ -n "${NOTARY_PROFILE:-}" ]; then
