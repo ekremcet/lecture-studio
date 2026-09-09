@@ -239,7 +239,7 @@ struct GettingStartedView: View {
             }
             step(done: state.assistant, title: "Connect the assistant", detail: "The assistant runs on an Oberik project you own. The guide walks through it with screenshots: create the project, add a model, allow what the assistant may do, copy the project id and key into Settings. Without it the editor, preview and presenter work; the chat and source search do not.") {
                 Button("Setup guide") { NSWorkspace.shared.open(oberikGuideURL) }.buttonStyle(.plainBordered)
-                Button(state.assistant ? "Settings" : "Connect…") { openSettingsWindow() }.buttonStyle(state.assistant ? .plainBordered : .prominent)
+                SettingsLink { Text(state.assistant ? "Settings" : "Connect…") }.buttonStyle(state.assistant ? .plainBordered : .prominent)
             }
             step(done: state.sources, title: "Add the material the deck should draw on", detail: "Readings, papers, notes, or old slides. They are indexed so the assistant can search and cite them when you ask. Shared sources are searched everywhere; a course or a session can have its own.") {
                 Button("Add shared sources") { store.dialog = .sources }.buttonStyle(state.sources ? .plainBordered : .prominent)

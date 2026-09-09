@@ -180,10 +180,8 @@ struct TermPicker: View {
 
 /// Open the Settings window (the Agent tab holds the Oberik connection).
 @MainActor
-func openSettingsWindow() {
-    if #available(macOS 14, *) { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
-    else { NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil) }
-}
+// Settings opens through SwiftUI's `SettingsLink` (the `showSettingsWindow:` selector it used to send
+// does nothing on macOS 26).
 
 let oberikURL = URL(string: "https://oberik.com/")!
 /// The step-by-step guide with screenshots on the app's site.
