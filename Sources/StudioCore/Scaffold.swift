@@ -1,6 +1,6 @@
 import Foundation
 
-/// Turn a title into a folder name; Turkish letters fold to ASCII as in the web app.
+/// Turn a title into a folder name; Turkish letters fold to ASCII.
 public func slug(_ s: String) -> String {
     var t = s.decomposedStringWithCanonicalMapping
     t = Rx("[\\u0300-\\u036f]").replace(t, with: "")
@@ -17,7 +17,7 @@ func cleanPrefix(_ p: String?, fallback: String) -> String {
     return v.isEmpty ? fallback : v
 }
 
-/// The scaffolds of the create dialogs. Mirrors app/api/repo/scaffold/route.ts.
+/// The scaffolds of the create dialogs.
 public struct Scaffold {
     public let fs: RepoFS
     public init(fs: RepoFS) { self.fs = fs }
@@ -224,7 +224,7 @@ public struct Scaffold {
     }
 }
 
-/// `save_asset`: an image from an https URL or a data: URI into `<week_dir>/assets/`. Mirrors app/api/repo/asset/route.ts.
+/// `save_asset`: an image from an https URL or a data: URI into `<week_dir>/assets/`.
 public enum Assets {
     static let maxBytes = 20 * 1024 * 1024
     static let imageExt = Rx("\\.(png|jpe?g|gif|webp|svg|avif)$", .caseInsensitive)

@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import StudioCore
 
-/// A view over one conversation. Mirrors Chat.tsx.
+/// A view over one conversation.
 struct ChatView: View {
     @Environment(StudioStore.self) private var store
     var scopes: [ChatScope]

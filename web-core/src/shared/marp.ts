@@ -1,4 +1,3 @@
-"use client";
 import { Marp } from "@marp-team/marp-core";
 
 let themesPromise: Promise<Record<string, string>> | null = null;

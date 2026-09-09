@@ -1,7 +1,7 @@
 import Foundation
 
 /// A thin wrapper over NSRegularExpression with JavaScript-like ergonomics, so the ports of the
-/// web app's regexes read the same as their TypeScript originals.
+/// regexes read the same as their TypeScript originals.
 public struct Rx {
     public let re: NSRegularExpression
 
@@ -62,7 +62,7 @@ public struct Rx {
 extension String {
     /// JavaScript's `trim()`.
     public var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
-    /// Capitalise the first character only, as the web app's `cap`.
+    /// Capitalise the first character only.
     public var capFirst: String { isEmpty ? self : prefix(1).uppercased() + dropFirst() }
     /// `s.split("\n")` with JavaScript semantics (keeps empty pieces).
     public var jsLines: [String] { components(separatedBy: "\n") }

@@ -1,4 +1,3 @@
-"use client";
 import { Marp } from "@marp-team/marp-core";
 
 let parser: Marp | null = null;

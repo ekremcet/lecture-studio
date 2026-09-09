@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import StudioCore
 
-/// Second screen: the units of one course with their files, and the course chat on the right. Mirrors WeekPicker.tsx.
+/// Second screen: the units of one course with their files, and the course chat on the right.
 struct WeekPickerView: View {
     @Environment(StudioStore.self) private var store
 

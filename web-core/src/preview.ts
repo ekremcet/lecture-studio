@@ -141,7 +141,7 @@ const api = {
   starts(markdown: string): number[] {
     return slideStarts(markdown);
   },
-  /** A markdown or plain-text document instead of a deck (the web app's DocPreview). */
+  /** A markdown or plain-text document instead of a deck (the document preview). */
   renderDocument(markdown: string, deckDir: string, plain: boolean) {
     themeStyle().textContent = "";
     document.body.classList.add("doc");

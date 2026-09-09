@@ -2,7 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// Conversation state that outlives the chat panel: panels hide and show while a turn streams.
-/// Mirrors app/lib/client/chat-store.ts, with the stream events arriving from the agent bridge.
+///ts, with the stream events arriving from the agent bridge.
 struct ChatAttachment: Codable, Equatable, Identifiable {
     var id: String?
     var kind: String

@@ -1,4 +1,3 @@
-"use client";
 /**
  * Editor language support for Marp decks: markdown with highlighted code fences, plus
  * decorations for what Marp adds on top of markdown (front matter, slide separators,

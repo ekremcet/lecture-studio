@@ -6,7 +6,7 @@ public struct GitError: LocalizedError {
     public var errorDescription: String? { message }
 }
 
-/// Human-driven git: status, commit all, push, pull. One operation at a time. Mirrors app/lib/server/git.ts.
+/// Human-driven git: status, commit all, push, pull. One operation at a time.
 public actor GitClient {
     public let root: URL
     public init(root: URL) { self.root = root }

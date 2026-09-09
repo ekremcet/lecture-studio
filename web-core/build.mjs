@@ -25,8 +25,6 @@ const options = {
   target: ["safari17"],
   minify: !watch,
   sourcemap: watch ? "inline" : false,
-  // The shared modules start with "use client" (they were first written for a Next.js app); a no-op here.
-  logOverride: { "ignored-directive": "silent" },
   define: { "process.env.NODE_ENV": '"production"' },
   loader: { ".css": "text" },
   absWorkingDir: here,

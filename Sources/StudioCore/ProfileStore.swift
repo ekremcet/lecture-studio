@@ -2,7 +2,7 @@ import Foundation
 
 public let META_FILE = "studio.json"
 
-/// The presenter profile at the repo root. Mirrors app/lib/server/profile.ts.
+/// The presenter profile at the repo root.
 public struct ProfileStore {
     public let fs: RepoFS
     public init(fs: RepoFS) { self.fs = fs }
@@ -65,7 +65,7 @@ public struct ProfileStore {
     }
 }
 
-/// `<course>/studio.json`. Mirrors app/lib/server/lecture-meta.ts.
+/// `<course>/studio.json`.
 public struct LectureMetaStore {
     public let fs: RepoFS
     public init(fs: RepoFS) { self.fs = fs }

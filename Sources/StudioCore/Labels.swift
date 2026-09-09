@@ -1,6 +1,6 @@
 import Foundation
 
-/// Display names derived from folder names. Mirrors app/lib/client/labels.ts.
+/// Display names derived from folder names.
 public enum Labels {
     static let codeRx = Rx("^([a-z]{2,4}\\d{3,4})(?:-(.+))?$", .caseInsensitive)
 

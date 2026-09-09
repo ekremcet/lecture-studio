@@ -1,6 +1,6 @@
 import Foundation
 
-/// The two control-plane calls the web app made from its server: mint an end-user token, list models.
+/// The two control-plane calls: mint an end-user token, list models.
 /// The project key never leaves this process; the web view only ever sees short-lived tokens.
 public struct OberikControl: Sendable {
     public static let defaultBaseURL = "https://oberik.com"

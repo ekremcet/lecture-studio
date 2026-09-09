@@ -12,7 +12,7 @@ public func parseUnit(_ name: String) -> ParsedUnit? {
     return ParsedUnit(prefix: (m[1] ?? "").lowercased(), n: n, sep: m[2] ?? "")
 }
 
-/// Derive header conventions and existing units from the decks of a course folder. Mirrors course-meta.ts.
+/// Derive header conventions and existing units from the decks of a course folder.
 public func courseMeta(fs: RepoFS, course: String) -> CourseMeta {
     let lecture = LectureMetaStore(fs: fs).read(course)
     let profile = ProfileStore(fs: fs).read()

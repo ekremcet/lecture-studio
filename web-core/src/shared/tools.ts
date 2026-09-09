@@ -1,21 +1,4 @@
-"use client";
-import type { ClientToolDef, UiComponent } from "@oberik/sdk";
-import { api } from "./api";
-import type { QaResult } from "./qa";
-
-/** What the tools need from the page: a way to run QA on a deck and to react to file changes. */
-export interface ToolHost {
-  qaDeck: (path: string) => Promise<QaResult>;
-  showPreview: (path: string, page?: number) => void;
-  onFileChanged: (path: string) => void;
-  /** Directory of the open file, for "save to assets" defaults. */
-  currentDir?: () => string;
-  /** Source materials the current conversation can search, with their index status. */
-  listSources: () => Promise<Array<{ name: string; path?: string; scope: string; status: string }>>;
-}
-
-const str = (v: unknown) => (typeof v === "string" ? v : String(v ?? ""));
-const num = (v: unknown) => (typeof v === "number" ? v : v == null || v === "" ? undefined : Number(v));
+import type { ClientToolDef } from "@oberik/sdk";
 
 /** A tool as the agent sees it: name, description, schema. The handler is what differs per host. */
 export interface ToolSpec {
@@ -25,7 +8,7 @@ export interface ToolSpec {
   requiresApproval?: boolean;
 }
 
-/** The ten client tools, host-independent. The web app and the macOS app attach their own handlers. */
+/** The client tools, host-independent: the Mac app answers each one over the WKWebView bridge (StudioStore.runTool). */
 export const TOOL_SPECS: ToolSpec[] = [
   {
     name: "list_dir",
@@ -98,40 +81,3 @@ export const UI_SPECS = [
     parameters: { type: "object", properties: { path: { type: "string" }, page: { type: "integer", description: "1-based slide number" } }, required: ["path"] },
   },
 ];
-
-/** The QA payload kept small for the model: only failing slides in detail. */
-export function compactQa(r: QaResult) {
-  const failing = r.slides.filter((s) => s.offenders.length || s.missingImages.length || s.scrollOverflowY > 2);
-  return {
-    slides: r.slides.length,
-    overflowPages: r.overflowPages,
-    missingImagePages: r.missingImagePages,
-    scopedStylePages: r.slides.filter((s) => s.warnings.includes("scoped style present")).map((s) => s.page),
-    details: failing.map((s) => ({ page: s.page, title: s.title, words: s.words, scrollOverflowY: s.scrollOverflowY, offenders: s.offenders.slice(0, 5), missingImages: s.missingImages, warnings: s.warnings })),
-  };
-}
-
-type Handler = ClientToolDef["handler"];
-
-export function makeTools(host: ToolHost): ClientToolDef[] {
-  const changed = <T,>(path: unknown, r: T): T => {
-    host.onFileChanged(str(path));
-    return r;
-  };
-  const handlers: Record<string, Handler> = {
-    list_dir: async ({ path }) => (await api.tree(str(path) || ".")).entries,
-    read_file: async ({ path, from, to }) => api.read(str(path), num(from), num(to)),
-    create_file: async ({ path, content }) => changed(path, await api.create(str(path), str(content))),
-    overwrite_file: async ({ path, content }) => changed(path, await api.overwrite(str(path), str(content))),
-    append_file: async ({ path, content }) => changed(path, await api.append(str(path), str(content))),
-    replace_in_file: async ({ path, old, new: newText }) => changed(path, await api.replace(str(path), str(old), str(newText))),
-    save_asset: async ({ week_dir, filename, source }) => api.saveAsset(str(week_dir), str(filename), str(source)),
-    list_sources: async () => host.listSources(),
-    qa_deck: async ({ path }) => compactQa(await host.qaDeck(str(path))),
-  };
-  return TOOL_SPECS.map((spec) => ({ ...spec, handler: handlers[spec.name] }));
-}
-
-export function makeUi(host: ToolHost): UiComponent[] {
-  return UI_SPECS.map((spec) => ({ ...spec, render: (args) => host.showPreview(str(args.path), num(args.page)) }));
-}

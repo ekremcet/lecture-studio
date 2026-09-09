@@ -3,7 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 import StudioCore
 
-/// First screen: one card per course or talk. Mirrors LecturePicker.tsx.
+/// First screen: one card per course or talk.
 struct LecturePickerView: View {
     @Environment(StudioStore.self) private var store
 
@@ -213,7 +213,7 @@ struct DashedCard: View {
     }
 }
 
-/// The three things a new studio needs, as a checklist that ticks itself. Mirrors GettingStarted.tsx.
+/// The three things a new studio needs, as a checklist that ticks itself.
 struct GettingStartedView: View {
     @Environment(StudioStore.self) private var store
     var state: GettingStartedState

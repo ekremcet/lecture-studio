@@ -1,6 +1,6 @@
 import Foundation
 
-/// Who is presenting. Stored as `studio.json` at the root of the lecture repo. Mirrors app/lib/server/profile.ts.
+/// Who is presenting. Stored as `studio.json` at the root of the lecture repo.
 public struct Profile: Codable, Equatable, Sendable {
     public var name: String = ""
     public var affiliation: String?
@@ -23,7 +23,7 @@ public struct Profile: Codable, Equatable, Sendable {
 
 public enum LectureKind: String, Codable, Sendable { case course, talk }
 
-/// Per-lecture display metadata, `<course>/studio.json`. Mirrors app/lib/server/lecture-meta.ts.
+/// Per-lecture display metadata, `<course>/studio.json`.
 public struct LectureMeta: Codable, Equatable, Sendable {
     public var title: String?
     public var code: String?

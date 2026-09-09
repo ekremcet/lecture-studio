@@ -1,6 +1,6 @@
 import Foundation
 
-/// The repo listing the pickers and the workspace are built from. Mirrors app/api/repo/files/route.ts.
+/// The repo listing the pickers and the workspace are built from.
 public struct FilesIndex: Sendable {
     public var files: [FileInfo]
     public var lectures: [String: LectureMeta]
@@ -84,7 +84,7 @@ public struct FilesIndex: Sendable {
     }
 }
 
-/// Source files on disk in the three folders the app knows. Mirrors app/api/repo/sources/route.ts.
+/// Source files on disk in the three folders the app knows.
 public enum SourceFolders {
     public static let dir = "sources"
 

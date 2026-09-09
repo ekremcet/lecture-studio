@@ -1,7 +1,7 @@
 import SwiftUI
 import StudioCore
 
-/// Human-driven git: status, commit all, push, pull. The agent has no git tools. Mirrors GitBar.tsx.
+/// Human-driven git: status, commit all, push, pull. The agent has no git tools.
 struct GitBarView: View {
     @Environment(StudioStore.self) private var store
     @State private var st: GitStatus?

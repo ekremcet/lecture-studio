@@ -26,7 +26,7 @@ struct QaResult: Codable, Equatable {
     var overflowPages: [Int]
     var missingImagePages: [Int]
 
-    /// The payload kept small for the model: only failing slides in detail. Mirrors compactQa in tools.ts.
+    /// The payload kept small for the model: only failing slides in detail.
     var compact: [String: Any] {
         let failing = slides.filter { !$0.offenders.isEmpty || !$0.missingImages.isEmpty || $0.scrollOverflowY > 2 }
         return [

@@ -1,5 +1,5 @@
 /**
- * The editor WKWebView: CodeMirror with the Marp language support of the web app. Swift sets the text
+ * The editor WKWebView: CodeMirror with Marp language support. Swift sets the text
  * and hears about edits (debounced), the line at the top or under the cursor, and ⌘S.
  */
 import { EditorState, Compartment } from "@codemirror/state";

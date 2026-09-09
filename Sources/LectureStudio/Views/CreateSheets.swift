@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import StudioCore
 
-/// New course. Mirrors NewLectureDialog in CreateDialogs.tsx.
+/// New course.
 struct NewCourseSheet: View {
     @Environment(StudioStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -314,7 +314,7 @@ struct EditLectureSheet: View {
 }
 
 
-/// Bring an existing course folder or a single deck into the library. Mirrors nothing in the web app yet.
+/// Bring an existing course folder or a single deck into the library.
 struct ImportCourseSheet: View {
     @Environment(StudioStore.self) private var store
     @Environment(\.dismiss) private var dismiss

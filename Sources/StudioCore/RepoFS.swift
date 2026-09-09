@@ -1,6 +1,6 @@
 import Foundation
 
-/// The reasons a repo operation refuses. The messages match the web app's, so the agent's tool
+/// The reasons a repo operation refuses. The messages are stable, so the agent's tool
 /// results read the same on both platforms.
 public struct RepoPathError: LocalizedError, Equatable {
     public let message: String
@@ -27,7 +27,7 @@ public struct DirEntry: Codable, Equatable, Sendable {
 }
 
 /// File-system access confined to the lecture repo. Every write of the app and of the agent's tools
-/// goes through here. Mirrors app/lib/server/repo-fs.ts.
+/// goes through here.
 public struct RepoFS: Sendable {
     public let root: URL
 
@@ -137,7 +137,7 @@ public struct RepoFS: Sendable {
         try h.write(contentsOf: Data(content.utf8))
     }
 
-    /// Replace exactly one occurrence. Refuses zero or many matches, with the web app's wording.
+    /// Replace exactly one occurrence. Refuses zero or many matches.
     @discardableResult
     public func replaceOnce(_ relative: String, old: String, new: String) throws -> Int {
         let text = try readString(relative)

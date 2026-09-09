@@ -1,7 +1,7 @@
 import SwiftUI
 import StudioCore
 
-/// Who is presenting. Saved as `studio.json` at the root of the lecture repository. Mirrors ProfileDialog.tsx.
+/// Who is presenting. Saved as `studio.json` at the root of the lecture repository.
 struct ProfileSheet: View {
     @Environment(StudioStore.self) private var store
     @Environment(\.dismiss) private var dismiss

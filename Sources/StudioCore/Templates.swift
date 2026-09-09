@@ -1,7 +1,6 @@
 import Foundation
 
-/// Scaffolds that follow the conventions of the existing courses. Mirrors app/lib/server/templates.ts
-/// line for line, so a deck created on the Mac matches one created in the web app.
+/// Scaffolds that follow the conventions of the existing courses.
 public enum Templates {
     public static func contactLines(_ p: Profile) -> [String] {
         var lines: [String] = []

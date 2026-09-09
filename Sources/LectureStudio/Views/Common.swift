@@ -9,7 +9,7 @@ struct WebViewHost: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
-/// A small uppercase label, the panel headers of the web app.
+/// A small uppercase label for panel headers.
 struct PanelHeader<Trailing: View>: View {
     var icon: String
     var title: String
@@ -73,7 +73,7 @@ struct Chip: View {
 }
 
 extension View {
-    /// A sheet form with the dialog chrome the web app uses: title, description, fields, footer.
+    /// A sheet form with the dialog chrome: title, description, fields, footer.
     func dialogFrame(width: CGFloat = 520) -> some View { self.padding(20).frame(width: width) }
 }
 

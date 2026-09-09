@@ -1,4 +1,3 @@
-"use client";
 /**
  * Overflow scan on the rendered Marp DOM. Port of a Node script that ran against exported HTML,
  * with one change: geometry comes from getBoundingClientRect relative to the section, scaled back to

@@ -4,7 +4,7 @@ import PDFKit
 import Quartz
 import StudioCore
 
-/// Preview for everything that is not a Marp deck. Mirrors DocPreview.tsx with native viewers.
+/// Preview for everything that is not a Marp deck.
 struct DocPreviewView: View {
     @Environment(StudioStore.self) private var store
     var path: String

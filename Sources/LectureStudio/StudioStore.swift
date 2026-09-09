@@ -7,7 +7,7 @@ enum Dialog: Identifiable { case lecture, talk, editLecture, week, file, sources
 enum PanelId: String, CaseIterable, Identifiable { case chat, preview, editor; var id: String { rawValue } }
 enum SyncSide { case editor, preview }
 
-/// A chat scope: the unit conversation or the whole-course conversation. Mirrors ChatScope in Chat.tsx.
+/// A chat scope: the unit conversation or the whole-course conversation.
 struct ChatScope: Identifiable, Equatable {
     var key: String
     var label: String
@@ -22,7 +22,7 @@ struct ChatScope: Identifiable, Equatable {
 struct Starter: Identifiable { var label: String; var prompt: String; var id: String { label } }
 struct EmptyAction: Identifiable { var label: String; var icon: String; var dialog: Dialog; var id: String { label } }
 
-/// Document tags per scope. Global sources are searched in every conversation. Mirrors SourcesDialog.tsx.
+/// Document tags per scope. Global sources are searched in every conversation.
 func sourceTags(course: String, unit: String) -> (global: String, lecture: String, week: String) {
     ("scope:global", "course:\(course)", "unit:\(course)/\(unit.isEmpty ? "_" : unit)")
 }
@@ -31,7 +31,7 @@ func scopeTags(course: String, unit: String?) -> [String] {
     return unit == nil ? [t.global, t.lecture] : [t.global, t.lecture, t.week]
 }
 
-/// The whole app state: the repo, what is open, the editor and preview, the agent. Mirrors Workbench.tsx.
+/// The whole app state: the repo, what is open, the editor and preview, the agent.
 @MainActor @Observable
 final class StudioStore {
     static let shared = StudioStore()
@@ -80,7 +80,7 @@ final class StudioStore {
         for (k, v) in AppSettings.panelFractions { if let id = PanelId(rawValue: k) { out[id] = CGFloat(v) } }
         return out
     }()
-    /// Left-to-right order of the workspace panels; the user can move them, as in the web app.
+    /// Left-to-right order of the workspace panels; the user can move them.
     var panelOrder: [PanelId] = {
         let saved = AppSettings.panelOrder.compactMap(PanelId.init(rawValue:))
         return Set(saved) == Set(PanelId.allCases) ? saved : PanelId.allCases
@@ -410,7 +410,7 @@ final class StudioStore {
         }
     }
 
-    // MARK: scroll sync (500 ms lock, as in Workbench.tsx)
+    // MARK: scroll sync (500 ms lock)
 
     func goToSlide(_ index: Int, from: String) {
         current = index
@@ -488,7 +488,7 @@ final class StudioStore {
         AppSettings.showNotes = showNotes
     }
 
-    // MARK: agent tool host (mirrors the ToolHost in Workbench.tsx)
+    // MARK: agent tool host (the client tools declared in web-core/src/shared/tools.ts)
 
     private func onFileChanged(_ path: String) {
         Task { await refreshFiles() }
@@ -809,7 +809,7 @@ struct SourceRow: Identifiable, Equatable {
     var pending: Bool { doc == nil }
 }
 
-/// The starter prompts of an empty conversation. Mirrors courseStarters/unitStarters/talkStarters in Workbench.tsx.
+/// The starter prompts of an empty conversation.
 enum Starters {
     static func course(_ word: String) -> [Starter] {
         [

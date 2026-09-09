@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import StudioCore
 
-/// The source materials the agent may search: root `sources/`, the lecture's, the unit's. Mirrors SourcesDialog.tsx.
+/// The source materials the agent may search: root `sources/`, the lecture's, the unit's.
 struct SourcesSheet: View {
     @Environment(StudioStore.self) private var store
     @Environment(\.dismiss) private var dismiss

@@ -1,7 +1,7 @@
 import SwiftUI
 import StudioCore
 
-/// The three-panel workspace: chat, preview, editor. Mirrors the "work" stage of Workbench.tsx.
+/// The three-panel workspace: chat, preview, editor.
 struct WorkspaceView: View {
     @Environment(StudioStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
@@ -171,7 +171,7 @@ struct PreviewPanel: View {
     }
 }
 
-/// One tick per slide; the current slide is the wide tick. Red = overflow, amber = missing image. Mirrors SlideRail.tsx.
+/// One tick per slide; the current slide is the wide tick. Red = overflow, amber = missing image.
 struct SlideRail: View {
     var count: Int
     var current: Int
