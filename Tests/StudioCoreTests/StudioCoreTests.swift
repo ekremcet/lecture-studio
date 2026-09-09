@@ -354,6 +354,20 @@ final class ChatArchiveTests: XCTestCase {
         XCTAssertEqual(archive.folder(scope: "cs101/week3").lastPathComponent, "cs101__week3")
     }
 
+    func testMessageDecodesOlderFilesAndKeepsSteering() throws {
+        // A file written before `steering` existed: no key at all, and no `events` either.
+        let older = #"{"id":"6DA0A90E-FB02-40FC-BB7D-6F6F7C41C153","role":"user","content":"hi"}"#
+        let m = try JSONDecoder().decode(ChatMessage.self, from: Data(older.utf8))
+        XCTAssertEqual(m.content, "hi")
+        XCTAssertFalse(m.steering)
+        XCTAssertEqual(m.events, [])
+        var st = ChatMessage(role: .user, content: "stop after week 3")
+        st.steering = true
+        let back = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(st))
+        XCTAssertEqual(back, st)
+        XCTAssertTrue(back.steering)
+    }
+
     func testTitleOfEmptyOrLong() {
         XCTAssertEqual(ArchivedChat.title(for: []), "")
         XCTAssertEqual(ArchivedChat.title(for: [ChatMessage(role: .assistant, content: "hi")]), "")

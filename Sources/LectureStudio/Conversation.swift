@@ -47,6 +47,11 @@ final class Conversation {
     var question: PendingQuestions?
     /// The id of the in-flight turn on the bridge.
     var turnId: String?
+    var turnStarted: Date?
+    /// Messages typed while a turn runs; they go out one by one once the assistant is free.
+    var queued: [QueuedMessage] = []
+    /// A steering message offered to the running turn, until a step takes it (or the turn ends).
+    var pendingSteer: String?
 
     /// Stream patches wait here and land together (`flushInterval`), so a fast stream changes the
     /// observed `messages` a few times a second instead of once per token. Every token used to
@@ -74,7 +79,9 @@ final class Conversation {
         updated = a.updated
         sessionId = a.sessionId
         messages = a.messages
+        queued = []
         todos = []
+        pendingSteer = nil
         approval = nil
         question = nil
     }
@@ -113,7 +120,10 @@ final class Conversation {
         created = Date()
         updated = created
         messages = []
+        queued = []
+        pendingSteer = nil
         todos = []
+        pendingSteer = nil
         sessionId = nil
         approval = nil
         question = nil
@@ -127,6 +137,13 @@ func summarize(_ v: Any?, max: Int = 120) -> String {
     return s.count > max ? String(s.prefix(max - 1)) + "…" : s
 }
 
+
+/// A message waiting for the assistant to finish the current turn.
+struct QueuedMessage: Identifiable, Equatable {
+    let id = UUID()
+    var text: String
+    var attachments: [PendingAttachment]
+}
 
 /// A file the user attached to the next message. Sent as a data: URI; images are seen by the model,
 /// other files are read as text by the platform.

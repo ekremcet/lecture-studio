@@ -107,6 +107,7 @@ final class AgentBridge: NSObject {
         guard AppSettings.hasOberik else { throw AgentError("Oberik project id and key are not set. Open Settings.") }
         let control = OberikControl(projectId: AppSettings.projectId, projectKey: AppSettings.projectKey)
         let t = try await control.mint(subject: AppSettings.subject)
+        AgentBridge.debug("token capabilities \(t.capabilities) warnings \(t.warnings)")
         token = t
         return t.accessToken
     }
@@ -133,6 +134,18 @@ final class AgentBridge: NSObject {
 
     func cancel(id: String) async {
         _ = try? await call("await window.studioAgent.cancel(id)", ["id": id])
+    }
+
+    /// A message into the running turn. False when the turn had ended first (or the page lost it).
+    func steer(id: String, message: String) async -> Bool {
+        do {
+            let r = try await call("return await window.studioAgent.steer(id, message)", ["id": id, "message": message])
+            AgentBridge.debug("steer -> \(String(describing: r))")
+            return r as? Bool ?? false
+        } catch {
+            AgentBridge.debug("steer failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     func resolveApproval(_ toolCallId: String, approved: Bool) async {

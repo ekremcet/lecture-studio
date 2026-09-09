@@ -701,20 +701,23 @@ final class StudioStore {
         )
     }
 
+    /// Sends, or queues while a turn runs: queued messages go out one by one when a turn completes.
     func sendMessage(scope: ChatScope, text: String, attachments: [PendingAttachment] = []) async {
         let conv = conversation(scope.key)
         let t = text.trimmed
-        guard !conv.running, !t.isEmpty || !attachments.isEmpty else { return }
+        guard !t.isEmpty || !attachments.isEmpty else { return }
         guard AppSettings.hasOberik else {
             toasts.error("Oberik is not configured", "Open Settings and add the project id and key.")
             return
         }
+        if conv.running { conv.queued.append(QueuedMessage(text: t, attachments: attachments)); return }
         var payloads: [[String: Any]] = []
         do { payloads = try attachments.map { try $0.payload() } } catch {
             toasts.error("Could not attach the file", error)
             return
         }
         conv.running = true
+        conv.turnStarted = Date()
         var userMsg = ChatMessage(role: .user, content: t.isEmpty ? "(attached \(attachments.count) file\(attachments.count == 1 ? "" : "s"))" : t)
         userMsg.attachments = attachments.map { ChatAttachment(id: nil, kind: $0.isImage ? "image" : "file", url: $0.url.absoluteString, name: $0.name, mime_type: $0.mime) }
         conv.messages.append(userMsg)
@@ -728,8 +731,53 @@ final class StudioStore {
             conv.patchLast(now: true) { $0.error = error.localizedDescription }
             conv.running = false
             conv.turnId = nil
+            conv.turnStarted = nil
             toasts.error("The assistant stopped", error)
         }
+    }
+
+    /// A message into the running turn: the agent reads it at its next step, as the user speaking. It
+    /// shows in the transcript where it landed, before the reply. When the turn ended first, the message
+    /// goes out as the next one. Returns whether it was read into the turn.
+    @discardableResult
+    func steer(scope: ChatScope, text: String) async -> Bool {
+        let conv = conversation(scope.key)
+        let t = text.trimmed
+        guard !t.isEmpty else { return false }
+        guard conv.running, let id = conv.turnId else { await sendMessage(scope: scope, text: t); return false }
+        guard conv.pendingSteer == nil else { toasts.show(.info, "One steering note at a time", "The earlier note is still waiting for the assistant's next step."); return false }
+        conv.pendingSteer = t
+        let accepted = await agent.steer(id: id, message: t)
+        conv.pendingSteer = nil
+        if accepted {
+            var m = ChatMessage(role: .user, content: t)
+            m.steering = true
+            conv.flushPatches()
+            conv.messages.insert(m, at: max(0, conv.messages.count - 1))
+            saveConversation(conv)
+            return true
+        }
+        // The turn ended before a step could take it: it goes out as the next message.
+        toasts.show(.info, "The assistant finished before reading your note", "It goes out as the next message.")
+        await sendMessage(scope: scope, text: t)
+        return false
+    }
+
+    func removeQueued(_ key: String, id: UUID) { conversation(key).queued.removeAll { $0.id == id } }
+
+    /// The scope a conversation key belongs to, when it is one of the scopes open now.
+    func scope(for key: String) -> ChatScope? {
+        if lectureScope.key == key { return lectureScope }
+        if let w = weekScope, w.key == key { return w }
+        return nil
+    }
+
+    /// Sends the first queued message of a conversation that is free (the scope must still be open).
+    func sendNextQueued(_ key: String) {
+        let conv = conversation(key)
+        guard !conv.running, let next = conv.queued.first, let scope = scope(for: key) else { return }
+        conv.queued.removeFirst()
+        Task { await sendMessage(scope: scope, text: next.text, attachments: next.attachments) }
     }
 
     func cancelTurn(_ key: String) {
@@ -794,28 +842,34 @@ final class StudioStore {
             let atts = decodeBridge([ChatAttachment].self, r["attachments"]) ?? []
             let cits = decodeBridge([ChatCitation].self, r["citations"]) ?? []
             let modelName = r["model"] as? String
+            let steered = r["steered"] as? [String] ?? []
             conv.patchLast(now: true) { m in
                 if !content.isEmpty { m.content = content }
                 if !atts.isEmpty { m.attachments = atts }
                 if !cits.isEmpty { m.citations = cits }
+                for s in steered { m.events.append("↪ read while working: \(s)") }
                 if let modelName, !modelName.isEmpty { m.events.append("model \(modelName)") }
             }
-            finishTurn(conv)
+            finishTurn(conv, completed: true)
         case "error":
             let msg = d["message"] as? String ?? "stream failed"
             conv.patchLast(now: true) { $0.error = msg }
             toasts.error("The assistant stopped", msg)
-            finishTurn(conv)
+            finishTurn(conv, completed: false)
         default: break
         }
     }
 
-    private func finishTurn(_ conv: Conversation) {
+    /// Ends the turn. After a completed one the next queued message goes out; after a stop or an
+    /// error the queue waits for the user.
+    private func finishTurn(_ conv: Conversation, completed: Bool) {
         conv.running = false
         conv.turnId = nil
+        conv.turnStarted = nil
         conv.approval = nil
         conv.question = nil
         saveConversation(conv)
+        if completed { sendNextQueued(conv.key) }
     }
 
     func answerApproval(_ conv: Conversation, approved: Bool) {

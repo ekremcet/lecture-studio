@@ -120,9 +120,33 @@ enum Smoke {
                 // load with a real turn (`sample` the process mid-stream).
                 let custom = ProcessInfo.processInfo.environment["STUDIO_SMOKE_PROMPT"].flatMap { $0.isEmpty ? nil : $0 }
                 let prompt = custom ?? "Call list_sources and tell me in one sentence how many source files are attached and which are ready. Do not edit any file."
-                await store.sendMessage(scope: scope, text: prompt)
                 let conv = store.conversation(scope.key)
+                // `STUDIO_SMOKE_QUEUE` is sent while the turn runs (so it queues and follows on its own);
+                // `STUDIO_SMOKE_STEER` goes into the turn a few seconds in.
+                let queue = ProcessInfo.processInfo.environment["STUDIO_SMOKE_QUEUE"].flatMap { $0.isEmpty ? nil : $0 }
+                let steer = ProcessInfo.processInfo.environment["STUDIO_SMOKE_STEER"].flatMap { $0.isEmpty ? nil : $0 }
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    if let queue { await store.sendMessage(scope: scope, text: queue); note("queue: queued=\(conv.queued.count) running=\(conv.running)") }
+                    if let steer {
+                        let after = Double(ProcessInfo.processInfo.environment["STUDIO_SMOKE_STEER_AFTER"] ?? "") ?? 3
+                        try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
+                        Task {  // the working panel, the pending steer and the queued bubble, while the turn runs
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            await Snapshot.capture(to: out.appendingPathComponent("mid"))
+                        }
+                        let ok = await store.steer(scope: scope, text: steer)
+                        note("steer: accepted=\(ok) steeringMessages=\(conv.messages.filter(\.steering).count) running=\(conv.running)")
+                    }
+                }
+                await store.sendMessage(scope: scope, text: prompt)
                 for _ in 0..<(custom == nil ? 120 : 600) { if !conv.running { break }; try? await Task.sleep(nanoseconds: 1_000_000_000) }
+                if queue != nil {
+                    // The queued message starts the next turn by itself; wait for that one too.
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    for _ in 0..<600 { if !conv.running { break }; try? await Task.sleep(nanoseconds: 1_000_000_000) }
+                    note("queue: after=\(conv.messages.count) messages, queued=\(conv.queued.count), lastUser=\(conv.messages.last(where: { $0.role == .user })?.content.prefix(60) ?? "")")
+                }
                 let last = conv.messages.last
                 note("chat: running=\(conv.running) session=\(conv.sessionId ?? "-") events=\(last?.events ?? []) error=\(last?.error ?? "none")\nreply=\(last?.content ?? "")\ncitations=\(last?.citations.count ?? 0)")
                 await Snapshot.capture(to: out.appendingPathComponent("chat"))

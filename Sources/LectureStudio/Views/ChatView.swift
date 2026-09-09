@@ -89,8 +89,10 @@ struct ChatView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if conv.messages.isEmpty { emptyState }
                         ForEach(conv.messages) { m in
-                            MessageRow(message: m, streaming: conv.running && m.role == .assistant && m.id == lastId).equatable()
+                            MessageRow(message: m, streaming: conv.running && m.role == .assistant && m.id == lastId, started: conv.running ? conv.turnStarted : nil).equatable()
                         }
+                        if let p = conv.pendingSteer { PendingSteerRow(text: p) }
+                        ForEach(conv.queued) { q in QueuedRow(message: q, scope: scope, running: conv.running) }
                     }
                     .padding(12)
                     // The very end of the content, outside the padding: a scroll to it lands exactly at the
@@ -101,7 +103,7 @@ struct ChatView: View {
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             // A new message: to the end now, and once more after the rows have settled, so the reply
             // that follows grows in view (the size-change anchor holds only from the bottom).
-            .onChange(of: conv.messages.count) { _, _ in
+            .onChange(of: conv.messages.count + conv.queued.count + (conv.pendingSteer == nil ? 0 : 1)) { _, _ in
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                 Task { @MainActor in
                     for wait in [150, 300, 500] { try? await Task.sleep(for: .milliseconds(wait)); proxy.scrollTo("bottom", anchor: .bottom) }
@@ -164,10 +166,13 @@ struct ChatView: View {
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
                 .overlay(alignment: .topLeading) {
-                    if input.isEmpty { Text(conv.running ? "The assistant is working…" : "Ask for a change… (↩ new line, ⌘↩ sends)").foregroundStyle(.tertiary).padding(.horizontal, 11).padding(.vertical, 6).allowsHitTesting(false) }
+                    if input.isEmpty { Text(conv.running ? "The assistant is working. ⌘↩ queues this for when it is done; ⌥⌘↩ steers it now." : "Ask for a change… (↩ new line, ⌘↩ sends)").foregroundStyle(.tertiary).padding(.horizontal, 11).padding(.vertical, 6).allowsHitTesting(false) }
                 }
                 .onKeyPress(.return, phases: .down) { press in
-                    if press.modifiers.contains(.command) { send(); return .handled }
+                    if press.modifiers.contains(.command) {
+                        if press.modifiers.contains(.option) && conv.running { steer() } else { send() }
+                        return .handled
+                    }
                     return .ignored
                 }
             if !pending.isEmpty {
@@ -193,6 +198,12 @@ struct ChatView: View {
                 Spacer()
                 if conv.running {
                     Button { store.cancelTurn(scope.key) } label: { Label("Stop", systemImage: "stop.fill") }.controlSize(.small).tint(.red).buttonStyle(.borderedProminent)
+                    Button { steer() } label: { Label("Steer now", systemImage: "arrow.turn.down.right") }.controlSize(.small)
+                        .disabled(input.trimmed.isEmpty || !pending.isEmpty)
+                        .help(pending.isEmpty ? "The assistant reads this at its next step, while it keeps working (⌥⌘↩)" : "Steering carries text only; queue the files instead")
+                    Button { send() } label: { Label("Queue", systemImage: "text.badge.plus") }.controlSize(.small).buttonStyle(.borderedProminent)
+                        .disabled(input.trimmed.isEmpty && pending.isEmpty)
+                        .help("Sent when the assistant finishes this reply (⌘↩)")
                 } else {
                     Button { send() } label: { Label("Send", systemImage: "paperplane.fill") }.controlSize(.small).buttonStyle(.borderedProminent).disabled(input.trimmed.isEmpty && pending.isEmpty)
                 }
@@ -219,14 +230,71 @@ struct ChatView: View {
         if p.runModal() == .OK { pending += p.urls.map { PendingAttachment(url: $0) } }
     }
 
+    /// Sends, or queues while the assistant works.
     func send() {
         let text = input.trimmed
-        guard !text.isEmpty || !pending.isEmpty, !store.conversation(scope.key).running else { return }
+        guard !text.isEmpty || !pending.isEmpty else { return }
         input = ""
         let files = pending
         pending = []
         let s = scope
         Task { await store.sendMessage(scope: s, text: text, attachments: files) }
+    }
+
+    /// Into the running turn, text only.
+    func steer() {
+        let text = input.trimmed
+        guard !text.isEmpty, pending.isEmpty, store.conversation(scope.key).running else { return }
+        input = ""
+        let s = scope
+        Task { await store.steer(scope: s, text: text) }
+    }
+}
+
+/// A steering note offered to the running turn, until the assistant's next step takes it.
+struct PendingSteerRow: View {
+    var text: String
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(text)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.accentColor.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+                .frame(maxWidth: 520, alignment: .trailing)
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Steering · the assistant reads this at its next step").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+/// A message waiting for the assistant: a faint bubble on the user's side, with the way out.
+struct QueuedRow: View {
+    @Environment(StudioStore.self) private var store
+    var message: QueuedMessage
+    var scope: ChatScope
+    var running: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(message.text.isEmpty ? "(attached \(message.attachments.count) file\(message.attachments.count == 1 ? "" : "s"))" : message.text)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .foregroundStyle(.secondary)
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+                .frame(maxWidth: 520, alignment: .trailing)
+            HStack(spacing: 8) {
+                Text(running ? "Queued · sends when the assistant finishes" : "Queued").font(.caption2).foregroundStyle(.tertiary)
+                if running && message.attachments.isEmpty {
+                    Button("Steer now") { store.removeQueued(scope.key, id: message.id); Task { await store.steer(scope: scope, text: message.text) } }.controlSize(.mini).help("Into the current reply instead of after it")
+                }
+                if !running {
+                    Button("Send") { store.removeQueued(scope.key, id: message.id); Task { await store.sendMessage(scope: scope, text: message.text, attachments: message.attachments) } }.controlSize(.mini)
+                }
+                Button("Remove") { store.removeQueued(scope.key, id: message.id) }.controlSize(.mini)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
@@ -237,10 +305,12 @@ struct ChatView: View {
 struct MessageRow: View, Equatable {
     var message: ChatMessage
     var streaming: Bool
+    /// When the running turn started (streaming rows only): the working panel shows the time spent.
+    var started: Date? = nil
     @Environment(StudioStore.self) private var store
     @State private var stepsOpen: Bool? = nil
 
-    static func == (a: MessageRow, b: MessageRow) -> Bool { a.message == b.message && a.streaming == b.streaming }
+    static func == (a: MessageRow, b: MessageRow) -> Bool { a.message == b.message && a.streaming == b.streaming && a.started == b.started }
 
     var body: some View {
         let user = message.role == .user
@@ -249,13 +319,14 @@ struct MessageRow: View, Equatable {
                 if !message.content.isEmpty { bubble(StreamingText(message.content), user: user) }
             } else if user {
                 bubble(Text(message.content).textSelection(.enabled), user: true)
+                if message.steering {
+                    Label("Sent while the assistant was working; it read this at its next step", systemImage: "arrow.turn.down.right").font(.caption2).foregroundStyle(.tertiary)
+                }
             } else if !message.content.isEmpty {
                 // Empty otherwise only when a turn never finished (the app quit mid-reply): no bubble then.
                 bubble(RichText(text: message.content), user: false)
             }
-            if streaming {
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(Activity.describe(message.events)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-            }
+            if streaming { WorkingPanel(events: message.events, started: started) }
             if let e = message.error {
                 Text(e).font(.caption).padding(8).background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.red)
             }
@@ -264,7 +335,7 @@ struct MessageRow: View, Equatable {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(Array(message.events.enumerated()), id: \.offset) { _, e in Text(e).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled) }
                     }.padding(.top, 2)
-                } label: { Text("\(message.events.count) steps").font(.caption).foregroundStyle(.secondary) }
+                } label: { Text("\(message.events.count) step\(message.events.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary) }
                 .frame(maxWidth: 520, alignment: .leading)
             }
             if !message.citations.isEmpty {
@@ -471,6 +542,38 @@ struct StreamingText: View {
                 Text(c)
             }
         }
+    }
+}
+
+/// What the assistant is doing right now, so a long turn can be followed: the activity, the time it has
+/// been at it, and the last few steps as they happen (the full list stays behind "N steps").
+struct WorkingPanel: View {
+    var events: [String]
+    var started: Date?
+
+    var recent: [String] { Array(events.filter { $0.hasPrefix("▶") || $0.hasPrefix("✓") || $0.hasPrefix("$") || $0.hasPrefix("↪") }.suffix(3)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(Activity.describe(events)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let started {
+                    TimelineView(.periodic(from: started, by: 1)) { ctx in
+                        Text(Self.elapsed(ctx.date.timeIntervalSince(started))).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            ForEach(Array(recent.enumerated()), id: \.offset) { _, e in
+                Text(e).font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.tail)
+            }
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    static func elapsed(_ t: TimeInterval) -> String {
+        let s = max(0, Int(t))
+        return s < 60 ? "\(s)s" : "\(s / 60)m \(String(format: "%02d", s % 60))s"
     }
 }
 

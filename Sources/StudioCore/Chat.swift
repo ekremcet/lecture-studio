@@ -44,7 +44,22 @@ public struct ChatMessage: Codable, Identifiable, Equatable {
     public var attachments: [ChatAttachment] = []
     public var citations: [ChatCitation] = []
     public var error: String?
+    /// A user message sent into a running turn (steering); shown where it landed, before the reply.
+    public var steering = false
     public init(role: Role, content: String) { self.role = role; self.content = content }
+
+    private enum CodingKeys: String, CodingKey { case id, role, content, events, attachments, citations, error, steering }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        role = try c.decode(Role.self, forKey: .role)
+        content = try c.decode(String.self, forKey: .content)
+        events = try c.decodeIfPresent([String].self, forKey: .events) ?? []
+        attachments = try c.decodeIfPresent([ChatAttachment].self, forKey: .attachments) ?? []
+        citations = try c.decodeIfPresent([ChatCitation].self, forKey: .citations) ?? []
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+        steering = try c.decodeIfPresent(Bool.self, forKey: .steering) ?? false
+    }
 }
 
 /// One conversation as the archive stores it: a scope (a course, or a unit of a course), the Oberik

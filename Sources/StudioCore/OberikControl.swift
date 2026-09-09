@@ -5,7 +5,7 @@ import Foundation
 public struct OberikControl: Sendable {
     public static let defaultBaseURL = "https://oberik.com"
     /// The capabilities the session asks for. The project ceiling may trim them.
-    public static let sessionCapabilities = ["chat", "computer", "web_search", "todo", "approvals", "ask_user", "ui_tools", "documents:read", "documents:write", "input:file", "input:image", "output:file"]
+    public static let sessionCapabilities = ["chat", "steer", "computer", "web_search", "todo", "approvals", "ask_user", "ui_tools", "documents:read", "documents:write", "input:file", "input:image", "output:file"]
 
     public let projectId: String
     public let projectKey: String

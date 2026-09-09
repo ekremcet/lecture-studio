@@ -52,6 +52,8 @@ interface DoneOut {
   attachments: Attachment[];
   citations: Citation[];
   model?: string | null;
+  /** Mid-turn corrections the agent read, in order (empty on an ordinary turn). */
+  steered: string[];
 }
 
 /**
@@ -121,7 +123,7 @@ const api = {
     handles.set(id, h);
     h.done
       .then((res) => {
-        const out: DoneOut = { session_id: res.session_id, content: res.content ?? "", attachments: res.attachments ?? [], citations: res.citations ?? [], model: res.model ?? null };
+        const out: DoneOut = { session_id: res.session_id, content: res.content ?? "", attachments: res.attachments ?? [], citations: res.citations ?? [], model: res.model ?? null, steered: res.steered ?? [] };
         chat(id, "done", { result: out });
       })
       .catch((e) => chat(id, "error", { message: errorText(e) }))
@@ -129,6 +131,21 @@ const api = {
   },
   async cancel(id: string): Promise<void> {
     await handles.get(id)?.cancel();
+  },
+  /** A message into the running turn; the agent reads it at its next step. The SDK can only hand it to
+   *  a server run that is under way, and a turn spends much of its time between runs (client tools run
+   *  here, then the next round starts), so keep offering it until a run takes it or the turn ends. False
+   *  when the turn ended first: send it as a normal message then. Needs the `steer` capability. */
+  async steer(id: string, message: string): Promise<boolean> {
+    let attempts = 0;
+    while (handles.has(id)) {
+      const h = handles.get(id)!;
+      if (await h.steer(message)) { post("studio", { type: "log", level: "info", message: `steer landed after ${attempts + 1} attempt(s)` }); return true; }
+      if (attempts++ === 0) post("studio", { type: "log", level: "warn", message: `steer not taken yet (run=${h.runId() ?? "none"}); retrying until a step takes it or the turn ends` });
+      await new Promise((r) => setTimeout(r, 600));
+    }
+    post("studio", { type: "log", level: "warn", message: `steer never taken (${attempts} attempts); sent as the next message` });
+    return false;
   },
   resolveApproval(toolCallId: string, approved: boolean): boolean {
     const r = approvals.get(toolCallId);
