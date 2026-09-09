@@ -247,3 +247,65 @@ final class TermValueTests: XCTestCase {
         XCTAssertEqual(TermValue.parse("Fall 2025")!.next.text, "Fall 2026")
     }
 }
+
+/// The chat transcript's hot path: markdown parsed once per text, stream patches landing in batches.
+final class ChatStreamTests: XCTestCase {
+    // MARK: chat markdown and stream batching
+
+    func testChatMarkdownBlocks() {
+        let text = """
+        ## Plan
+        First **bold** line
+        second line of the paragraph
+
+        - one
+        - two
+          continues two
+        1. first
+        2) second
+        ```
+        code a
+          code b
+        ```
+        """
+        let b = ChatMarkdown.blocks(text)
+        XCTAssertEqual(b.count, 5)
+        guard b.count == 5 else { return }
+        XCTAssertEqual(b[0], .heading(2, ChatMarkdown.inline("Plan")))
+        XCTAssertEqual(b[1], .paragraph(ChatMarkdown.inline("First **bold** line second line of the paragraph")))
+        XCTAssertEqual(b[2], .bullet([ChatMarkdown.inline("one"), ChatMarkdown.inline("two continues two")]))
+        XCTAssertEqual(b[3], .numbered([ChatMarkdown.inline("first"), ChatMarkdown.inline("second")]))
+        XCTAssertEqual(b[4], .code("code a\n  code b"))
+        // Inline markdown resolved: the bold run is one attributed run, the plain text keeps its words.
+        if case .paragraph(let a) = b[1] { XCTAssertEqual(String(a.characters), "First bold line second line of the paragraph") } else { XCTFail() }
+        XCTAssertEqual(ChatMarkdown.blocks(""), [])
+        XCTAssertEqual(ChatMarkdown.blocks("```\nopen fence"), [.code("open fence")])
+    }
+
+    func testChatMarkdownCache() {
+        let text = "- a\n- b\n\nend"
+        let first = ChatMarkdown.cached(text)
+        XCTAssertEqual(first, ChatMarkdown.blocks(text))
+        XCTAssertEqual(ChatMarkdown.cached(text), first)
+        XCTAssertNotEqual(ChatMarkdown.cached(text + "!"), first)
+    }
+
+    func testPendingPatchesDrainInOrderOnce() {
+        var q = PendingPatches<[String]>()
+        var value = ["start"]
+        XCTAssertFalse(q.drain(into: &value))
+        q.add { $0.append("a") }
+        q.add { $0.append("b") }
+        q.add { $0 = ["replaced"] }
+        q.add { $0.append("c") }
+        XCTAssertEqual(q.count, 4)
+        XCTAssertTrue(q.drain(into: &value))
+        XCTAssertEqual(value, ["replaced", "c"])
+        XCTAssertTrue(q.isEmpty)
+        XCTAssertFalse(q.drain(into: &value))
+        XCTAssertEqual(value, ["replaced", "c"])
+        q.add { $0.append("d") }
+        q.clear()
+        XCTAssertFalse(q.drain(into: &value))
+    }
+}

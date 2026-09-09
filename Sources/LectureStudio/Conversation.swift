@@ -1,8 +1,9 @@
 import Foundation
 import UniformTypeIdentifiers
+import StudioCore
 
 /// Conversation state that outlives the chat panel: panels hide and show while a turn streams.
-///ts, with the stream events arriving from the agent bridge.
+/// The stream events arrive from the agent bridge.
 struct ChatAttachment: Codable, Equatable, Identifiable {
     var id: String?
     var kind: String
@@ -80,17 +81,47 @@ final class Conversation {
     /// The id of the in-flight turn on the bridge.
     var turnId: String?
 
+    /// Stream patches wait here and land together (`flushInterval`), so a fast stream changes the
+    /// observed `messages` a few times a second instead of once per token. Every token used to
+    /// re-render and re-lay-out the whole transcript, which froze the app on a long reply (2026-09-09).
+    @ObservationIgnored private var pending = PendingPatches<ChatMessage>()
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
+    static let flushInterval: Duration = .milliseconds(80)
+
     init(key: String) {
         self.key = key
         sessionId = AppSettings.sessionId(for: key)
     }
 
-    func patchLast(_ fn: (inout ChatMessage) -> Void) {
-        guard !messages.isEmpty else { return }
-        fn(&messages[messages.count - 1])
+    /// Changes the last message. Patches queue in order and land on the next tick; `now` lands the
+    /// queue at once, for events the rest of the UI reacts to (the end of the turn, an error).
+    func patchLast(now: Bool = false, _ fn: @escaping (inout ChatMessage) -> Void) {
+        pending.add(fn)
+        if now { flushPatches() } else { scheduleFlush() }
+    }
+
+    /// Lands every queued patch as one change of `messages`.
+    func flushPatches() {
+        flushTask?.cancel()
+        flushTask = nil
+        guard !messages.isEmpty else { pending.clear(); return }
+        var last = messages[messages.count - 1]
+        if pending.drain(into: &last) { messages[messages.count - 1] = last }
+    }
+
+    private func scheduleFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.flushInterval)
+            guard !Task.isCancelled else { return }
+            self?.flushPatches()
+        }
     }
 
     func reset() {
+        flushTask?.cancel()
+        flushTask = nil
+        pending.clear()
         AppSettings.setSessionId(nil, for: key)
         messages = []
         todos = []

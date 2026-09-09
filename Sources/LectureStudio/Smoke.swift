@@ -3,7 +3,8 @@ import AppKit
 import StudioCore
 
 /// Development aid: `STUDIO_SMOKE=/dir` walks the screens against the open repo without clicking,
-/// and writes what it saw. `STUDIO_SMOKE_CHAT=1` adds one read-only agent turn.
+/// and writes what it saw. `STUDIO_SMOKE_CHAT=1` adds one read-only agent turn (`STUDIO_SMOKE_PROMPT` replaces
+/// the prompt); `STUDIO_SMOKE_STREAM=1` streams a long synthetic reply and reports the CPU it cost.
 @MainActor
 enum Smoke {
     static func run(store: StudioStore) {
@@ -114,16 +115,60 @@ enum Smoke {
                 note("chat: oberik=\(AppSettings.hasOberik) models=\(store.models?.models.count ?? -1) default=\(store.models?.defaultModel ?? "-")")
                 if let pong = try? await store.agent.ping() { note("chat: ping -> \(pong.prefix(80))") } else { note("chat: ping failed") }
                 note("chat: sending read-only turn (model=\(store.model.isEmpty ? "default" : store.model))")
-                let prompt = ProcessInfo.processInfo.environment["STUDIO_SMOKE_PROMPT"] ?? "Call list_sources and tell me in one sentence how many source files are attached and which are ready. Do not edit any file."
+                // A long-form `STUDIO_SMOKE_PROMPT` streams for a while, which is how to check the transcript under
+                // load with a real turn (`sample` the process mid-stream).
+                let custom = ProcessInfo.processInfo.environment["STUDIO_SMOKE_PROMPT"].flatMap { $0.isEmpty ? nil : $0 }
+                let prompt = custom ?? "Call list_sources and tell me in one sentence how many source files are attached and which are ready. Do not edit any file."
                 await store.sendMessage(scope: scope, text: prompt)
                 let conv = store.conversation(scope.key)
-                for _ in 0..<120 { if !conv.running { break }; try? await Task.sleep(nanoseconds: 1_000_000_000) }
+                for _ in 0..<(custom == nil ? 120 : 600) { if !conv.running { break }; try? await Task.sleep(nanoseconds: 1_000_000_000) }
                 let last = conv.messages.last
                 note("chat: running=\(conv.running) session=\(conv.sessionId ?? "-") events=\(last?.events ?? []) error=\(last?.error ?? "none")\nreply=\(last?.content ?? "")\ncitations=\(last?.citations.count ?? 0)")
                 await Snapshot.capture(to: out.appendingPathComponent("chat"))
             }
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_STREAM"] == "1", let scope = store.weekScope {
+                // A long markdown reply, streamed the way the bridge delivers it (the whole text so far, about
+                // twelve posts a second). The transcript re-rendered and re-laid-out everything per post before
+                // 2026-09-09 and froze; this reports the CPU the process spent while the reply streamed.
+                let conv = store.conversation(scope.key)
+                let reply = (1...40).map { i in
+                    "## Section \(i)\nSome **bold** text for section \(i) with a [link](https://example.com) and `code`.\n"
+                    + (1...8).map { "- item \($0) of section \(i) with a bit more text so the line wraps inside the bubble" }.joined(separator: "\n")
+                    + "\n\n1. first\n2. second\n"
+                }.joined(separator: "\n")
+                // The freeze had long finished replies above the streaming one: those rows must stay cheap.
+                for i in 1...8 {
+                    conv.messages.append(ChatMessage(role: .user, content: "earlier question \(i)"))
+                    conv.messages.append(ChatMessage(role: .assistant, content: reply))
+                }
+                conv.messages.append(ChatMessage(role: .user, content: "stream test"))
+                conv.messages.append(ChatMessage(role: .assistant, content: ""))
+                conv.running = true
+                let cpu0 = Smoke.cpuSeconds(), t0 = Date()
+                let steps = 300
+                var mainThreadStalls = 0
+                for s in 1...steps {
+                    let n = reply.count * s / steps
+                    conv.patchLast { $0.content = String(reply.prefix(n)) }
+                    let before = Date()
+                    try? await Task.sleep(nanoseconds: 30_000_000)
+                    if Date().timeIntervalSince(before) > 0.25 { mainThreadStalls += 1 }
+                }
+                conv.patchLast(now: true) { $0.content = reply }
+                conv.running = false
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                note("stream: chars=\(reply.count) steps=\(steps) wall=\(String(format: "%.1f", Date().timeIntervalSince(t0)))s cpu=\(String(format: "%.2f", Smoke.cpuSeconds() - cpu0))s stalls=\(mainThreadStalls)")
+                await Snapshot.capture(to: out.appendingPathComponent("stream"))
+            }
             if ProcessInfo.processInfo.environment["STUDIO_SMOKE_HOME"] == "1" { store.backToLectures(); try? await Task.sleep(nanoseconds: 3_000_000_000) }
             note("done")
         }
+    }
+
+    /// CPU time this process has used, user and system.
+    static func cpuSeconds() -> Double {
+        var ru = rusage()
+        getrusage(RUSAGE_SELF, &ru)
+        return Double(ru.ru_utime.tv_sec) + Double(ru.ru_utime.tv_usec) / 1e6 + Double(ru.ru_stime.tv_sec) + Double(ru.ru_stime.tv_usec) / 1e6
     }
 }

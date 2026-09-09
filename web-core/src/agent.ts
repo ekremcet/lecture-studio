@@ -54,8 +54,40 @@ interface DoneOut {
   model?: string | null;
 }
 
+/**
+ * Token posts are coalesced. The SDK reports every token; each post re-renders the transcript in
+ * Swift, and doing that per token on a long reply froze the app (2026-09-09). One post per tick
+ * carries the whole text so far (replace, not append: a reconnect can restart the text). A post goes
+ * out at once when the last one is older than a tick, so throttled timers cannot stall the stream.
+ */
+const TOKEN_TICK_MS = 80;
+const pendingTokens = new Map<string, { full: string; timer: ReturnType<typeof setTimeout> | null }>();
+const lastTokenPost = new Map<string, number>();
+
+function flushTokens(id: string) {
+  const p = pendingTokens.get(id);
+  if (!p) return;
+  if (p.timer) clearTimeout(p.timer);
+  pendingTokens.delete(id);
+  lastTokenPost.set(id, Date.now());
+  post("studio", { type: "chat", id, event: "token", full: p.full });
+}
+
+function queueToken(id: string, full: string) {
+  const p = pendingTokens.get(id);
+  if (p) p.full = full;
+  else pendingTokens.set(id, { full, timer: null });
+  const due = Date.now() - (lastTokenPost.get(id) ?? 0) >= TOKEN_TICK_MS;
+  if (due) flushTokens(id);
+  else if (!pendingTokens.get(id)!.timer) pendingTokens.get(id)!.timer = setTimeout(() => flushTokens(id), TOKEN_TICK_MS);
+}
+
 function chat(id: string, event: string, data: Record<string, unknown> = {}) {
+  // Text posted so far lands before any other event of the turn, so steps, citations and the end of
+  // the turn keep their order relative to the reply.
+  flushTokens(id);
   post("studio", { type: "chat", id, event, ...data });
+  if (event === "done" || event === "error") lastTokenPost.delete(id);
 }
 
 const api = {
@@ -67,7 +99,7 @@ const api = {
       {
         onReconnect: (attempt) => chat(id, "reconnect", { attempt }),
         onGuardrail: (stage, flags) => chat(id, "guardrail", { stage, flags }),
-        onToken: (_d, full) => chat(id, "token", { full }),
+        onToken: (_d, full) => queueToken(id, full),
         onReasoning: (_d, full) => chat(id, "reasoning", { chars: full.length }),
         onToolStart: (name, inp) => chat(id, "toolStart", { name, summary: summarize(inp) }),
         onToolEnd: (name) => chat(id, "toolEnd", { name }),

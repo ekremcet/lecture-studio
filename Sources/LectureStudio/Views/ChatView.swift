@@ -9,7 +9,6 @@ struct ChatView: View {
     var defaultKey: String
     @State private var scopeKey = ""
     @State private var input = ""
-    @State private var saving: ChatAttachment?
     @State private var pending: [PendingAttachment] = []
     @State private var dropTarget = false
 
@@ -33,7 +32,7 @@ struct ChatView: View {
         .sheet(isPresented: Binding(get: { conv.question != nil }, set: { if !$0 { store.answerQuestion(conv, answer: ["chat_instead": true]) } })) {
             if let q = conv.question { QuestionSheet(pending: q) { store.answerQuestion(conv, answer: $0) } }
         }
-        .sheet(item: $saving) { a in SaveAttachmentSheet(attachment: a, defaultDir: store.currentDir) }
+        .sheet(item: Binding(get: { store.savingAttachment }, set: { store.savingAttachment = $0 })) { a in SaveAttachmentSheet(attachment: a, defaultDir: store.currentDir) }
     }
 
     func toolbar(_ conv: Conversation) -> some View {
@@ -69,21 +68,28 @@ struct ChatView: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
+    // The transcript is the hot path while a reply streams: every change of the last message
+    // re-renders this. Rows are Equatable, so only the streaming row's body and layout run per
+    // tick; the others keep their cached size (see MessageRow). The stack is lazy so rows out of
+    // view are not rendered at all: a plain stack rebuilt the display list of every long reply on
+    // each tick. The scroll view keeps the bottom in view while content grows (a reply streams,
+    // or changes from plain text to markdown at the end of the turn) as long as the reader is at
+    // the bottom; scrolling up stops that, as in any chat.
     func messages(_ conv: Conversation) -> some View {
-        ScrollViewReader { proxy in
+        let lastId = conv.messages.last?.id
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if conv.messages.isEmpty { emptyState }
-                    ForEach(Array(conv.messages.enumerated()), id: \.element.id) { i, m in
-                        MessageRow(message: m, streaming: m.role == .assistant && conv.running && i == conv.messages.count - 1, onSave: { saving = $0 })
-                            .id(m.id)
+                    ForEach(conv.messages) { m in
+                        MessageRow(message: m, streaming: conv.running && m.role == .assistant && m.id == lastId).equatable()
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(12)
             }
-            .onChange(of: conv.messages.last?.content) { _, _ in proxy.scrollTo("bottom") }
-            .onChange(of: conv.messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .onChange(of: conv.messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
         }
     }
 
@@ -199,22 +205,25 @@ struct ChatView: View {
     }
 }
 
-struct MessageRow: View {
+/// One message. Equatable on the message and the streaming flag: SwiftUI skips the body of every
+/// row that did not change, which is all but the last one while a reply streams. While streaming
+/// the text is one plain `Text` (no markdown, no selection); the block layout, with its nested
+/// stacks, appears once the turn ends.
+struct MessageRow: View, Equatable {
     var message: ChatMessage
     var streaming: Bool
-    var onSave: (ChatAttachment) -> Void
+    @Environment(StudioStore.self) private var store
     @State private var stepsOpen: Bool? = nil
+
+    static func == (a: MessageRow, b: MessageRow) -> Bool { a.message == b.message && a.streaming == b.streaming }
 
     var body: some View {
         let user = message.role == .user
         VStack(alignment: user ? .trailing : .leading, spacing: 6) {
-            if !message.content.isEmpty || !streaming {
-                MarkdownText(message.content, plain: user)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(user ? Color.accentColor : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                    .foregroundStyle(user ? Color.white : Color.primary)
-                    .frame(maxWidth: 520, alignment: user ? .trailing : .leading)
+            if streaming {
+                if !message.content.isEmpty { bubble(StreamingText(message.content), user: user) }
+            } else {
+                bubble(MarkdownText(message.content, plain: user).textSelection(.enabled), user: user)
             }
             if streaming {
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text(Activity.describe(message.events)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
@@ -246,7 +255,7 @@ struct MessageRow: View {
                             } else { Image(systemName: "doc").frame(width: 36, height: 36) }
                             if let u = URL(string: a.url) { Link(a.name ?? a.kind, destination: u).font(.caption) } else { Text(a.name ?? a.kind).font(.caption) }
                             Spacer()
-                            if a.isImage { Button { onSave(a) } label: { Image(systemName: "square.and.arrow.down") }.buttonStyle(.plain).help("Save to assets") }
+                            if a.isImage { Button { store.savingAttachment = a } label: { Image(systemName: "square.and.arrow.down") }.buttonStyle(.plain).help("Save to assets") }
                         }
                         .padding(6).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
                     }
@@ -254,6 +263,13 @@ struct MessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: user ? .trailing : .leading)
+    }
+
+    func bubble<V: View>(_ v: V, user: Bool) -> some View {
+        v.padding(.horizontal, 12).padding(.vertical, 8)
+            .background(user ? Color.accentColor : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .foregroundStyle(user ? Color.white : Color.primary)
+            .frame(maxWidth: 520, alignment: user ? .trailing : .leading)
     }
 }
 
@@ -360,81 +376,58 @@ struct SaveAttachmentSheet: View {
 }
 
 
+/// The reply while it streams: plain text in chunks of whole lines, so a flush lays out the last
+/// chunk again and the earlier ones keep their size. One `Text` holding the whole reply costs a
+/// layout of everything per flush, which grows with the reply (a 30 KB reply took more than a
+/// frame per flush).
+struct StreamingText: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    static let linesPerChunk = 24
+
+    var chunks: [String] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        return stride(from: 0, to: lines.count, by: Self.linesPerChunk).map { lines[$0..<min($0 + Self.linesPerChunk, lines.count)].joined(separator: "\n") }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(chunks.enumerated()), id: \.offset) { _, c in
+                Text(c)
+            }
+        }
+    }
+}
+
 /// Markdown as the chat shows it: paragraphs, bullet and numbered lists, headings, fenced code, with
 /// inline bold/italic/code/links. Assistant replies are markdown; the user's own text stays as typed.
+/// The parse comes from `ChatMarkdown.cached`, never from this body: the body runs on every
+/// transcript change, the parse once per text.
 struct MarkdownText: View {
     let text: String
     let plain: Bool
     init(_ text: String, plain: Bool = false) { self.text = text; self.plain = plain }
 
-    enum Block { case paragraph(String), bullet([String]), numbered([String]), heading(Int, String), code(String) }
-
-    var blocks: [Block] {
-        var out: [Block] = []
-        var para: [String] = []
-        var list: [String] = []
-        var numbered = false
-        var code: [String]? = nil
-        func flushPara() { if !para.isEmpty { out.append(.paragraph(para.joined(separator: " "))); para = [] } }
-        func flushList() { if !list.isEmpty { out.append(numbered ? .numbered(list) : .bullet(list)); list = [] } }
-        for raw in text.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if var c = code {
-                if line.hasPrefix("```") { out.append(.code(c.joined(separator: "\n"))); code = nil } else { c.append(raw); code = c }
-                continue
-            }
-            if line.hasPrefix("```") { flushPara(); flushList(); code = []; continue }
-            if line.isEmpty { flushPara(); flushList(); continue }
-            if let m = line.range(of: "^#{1,6} ", options: .regularExpression) {
-                flushPara(); flushList()
-                out.append(.heading(line.distance(from: line.startIndex, to: m.upperBound) - 1, String(line[m.upperBound...])))
-                continue
-            }
-            if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("• ") {
-                flushPara()
-                if numbered { flushList() }
-                numbered = false
-                list.append(String(line.dropFirst(2)))
-                continue
-            }
-            if let m = line.range(of: "^\\d+[.)] ", options: .regularExpression) {
-                flushPara()
-                if !numbered { flushList() }
-                numbered = true
-                list.append(String(line[m.upperBound...]))
-                continue
-            }
-            if !list.isEmpty { list[list.count - 1] += " " + line; continue }
-            para.append(line)
-        }
-        if let c = code { out.append(.code(c.joined(separator: "\n"))) }
-        flushPara(); flushList()
-        return out
-    }
-
-    func inline(_ s: String) -> AttributedString {
-        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
-    }
-
     var body: some View {
         if plain {
             Text(text)
         } else {
+            let blocks = ChatMarkdown.cached(text)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in
                     switch b {
-                    case .paragraph(let p): Text(inline(p))
-                    case .heading(let level, let h): Text(inline(h)).font(level <= 2 ? .headline : .subheadline.weight(.semibold))
+                    case .paragraph(let p): Text(p)
+                    case .heading(let level, let h): Text(h).font(level <= 2 ? .headline : .subheadline.weight(.semibold))
                     case .bullet(let items):
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(items.enumerated()), id: \.offset) { _, it in
-                                HStack(alignment: .top, spacing: 6) { Text("•"); Text(inline(it)) }
+                                HStack(alignment: .top, spacing: 6) { Text("•"); Text(it) }
                             }
                         }
                     case .numbered(let items):
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(items.enumerated()), id: \.offset) { i, it in
-                                HStack(alignment: .top, spacing: 6) { Text("\(i + 1).").monospacedDigit(); Text(inline(it)) }
+                                HStack(alignment: .top, spacing: 6) { Text("\(i + 1).").monospacedDigit(); Text(it) }
                             }
                         }
                     case .code(let c):

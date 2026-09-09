@@ -57,6 +57,9 @@ final class StudioStore {
     var unit: String? = nil
     var filePath = ""
     var dialog: Dialog?
+    /// An image the assistant attached, waiting for the save sheet. On the store, not in a closure passed
+    /// down the transcript: a closure is a new value on every render and would invalidate every row.
+    var savingAttachment: ChatAttachment?
     /// What the import sheet works on (a folder or a deck file the user picked).
     var importSource: URL?
     var sourceCount = 0
@@ -677,7 +680,7 @@ final class StudioStore {
         do {
             try await agent.send(id: id, message: t.isEmpty ? "See the attached file(s)." : t, context: scope.context, sessionId: conv.sessionId, model: model, tags: scope.tags, attachments: payloads)
         } catch {
-            conv.patchLast { $0.error = error.localizedDescription }
+            conv.patchLast(now: true) { $0.error = error.localizedDescription }
             conv.running = false
             conv.turnId = nil
             toasts.error("The assistant stopped", error)
@@ -703,8 +706,9 @@ final class StudioStore {
         guard let conv = conversations.values.first(where: { $0.turnId == id }) else { return }
         switch event {
         case "token":
-            let full = d["full"] as? String ?? ""
-            conv.patchLast { $0.content = full }
+            // The page posts the whole text so far, at most a few times a second (agent.ts coalesces
+            // tokens); the store queues the patch as well, so the transcript is safe from a chatty page.
+            if let full = d["full"] as? String { conv.patchLast { $0.content = full } }
         case "reasoning":
             let n = d["chars"] as? Int ?? 0
             conv.patchLast { m in if m.content.isEmpty { m.events.removeAll { $0.hasPrefix("thinking") }; m.events.append("thinking (\(n) chars)") } }
@@ -720,6 +724,7 @@ final class StudioStore {
         case "citations":
             if let c = decodeBridge([ChatCitation].self, d["citations"]) { conv.patchLast { $0.citations = c } }
         case "todos":
+            conv.flushPatches()
             conv.todos = decodeBridge([ChatTodo].self, d["todos"]) ?? []
         case "command":
             let cmd = d["command"] as? String ?? ""
@@ -729,8 +734,10 @@ final class StudioStore {
                 if let i = m.events.firstIndex(where: { $0.hasPrefix(key) }) { m.events[i] = String((m.events[i] + delta).prefix(2000)) } else { m.events.append(String("\(key)\n\(delta)".prefix(2000))) }
             }
         case "approval":
+            conv.flushPatches()
             conv.approval = decodeBridge(ApprovalRequest.self, d["request"])
         case "question":
+            conv.flushPatches()
             conv.question = decodeBridge(PendingQuestions.self, d["pending"])
         case "done":
             let r = d["result"] as? [String: Any] ?? [:]
@@ -742,7 +749,7 @@ final class StudioStore {
             let atts = decodeBridge([ChatAttachment].self, r["attachments"]) ?? []
             let cits = decodeBridge([ChatCitation].self, r["citations"]) ?? []
             let modelName = r["model"] as? String
-            conv.patchLast { m in
+            conv.patchLast(now: true) { m in
                 if !content.isEmpty { m.content = content }
                 if !atts.isEmpty { m.attachments = atts }
                 if !cits.isEmpty { m.citations = cits }
@@ -751,7 +758,7 @@ final class StudioStore {
             finishTurn(conv)
         case "error":
             let msg = d["message"] as? String ?? "stream failed"
-            conv.patchLast { $0.error = msg }
+            conv.patchLast(now: true) { $0.error = msg }
             toasts.error("The assistant stopped", msg)
             finishTurn(conv)
         default: break
