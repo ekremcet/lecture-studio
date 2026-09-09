@@ -154,6 +154,7 @@ struct SettingsView: View {
                             projectId = AppSettings.projectId
                             projectKey = AppSettings.projectKey
                             subject = AppSettings.subject
+                            store.oberikSettingsChanged()
                             status = "Imported from the project's .env into the Keychain."
                         } else { status = "No .env with OBERIK_PROJECT_ID next to the app." }
                     }
@@ -168,8 +169,7 @@ struct SettingsView: View {
         AppSettings.projectKey = projectKey.trimmed
         AppSettings.subject = subject.trimmed.isEmpty ? "presenter" : subject.trimmed
         if !repo.isEmpty { AppSettings.repoPath = repo }
-        store.agent.load()
-        Task { await store.loadModels() }
+        store.oberikSettingsChanged()
         status = "Saved. The key is in the Keychain."
     }
 

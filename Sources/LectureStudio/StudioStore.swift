@@ -50,6 +50,9 @@ final class StudioStore {
     var remoteWebURL: URL?
     var gitBranch = "main"
     var checklistHidden = AppSettings.checklistHidden
+    /// Whether an Oberik project id and key are set. Observable, unlike the defaults and the Keychain behind
+    /// it: the Getting started card and the chat's empty state change the moment Settings saves.
+    var oberikConfigured = AppSettings.hasOberik
     var refreshKey = 0
 
     // ---- navigation ----
@@ -222,6 +225,13 @@ final class StudioStore {
         }
     }
 
+    /// After Settings saves: the flag the views watch, the agent page, the model list.
+    func oberikSettingsChanged() {
+        oberikConfigured = AppSettings.hasOberik
+        agent.load()
+        Task { await loadModels() }
+    }
+
     func loadModels() async {
         guard AppSettings.hasOberik else { return }
         let c = OberikControl(projectId: AppSettings.projectId, projectKey: AppSettings.projectKey)
@@ -249,7 +259,7 @@ final class StudioStore {
     var hasCourse: Bool { files.contains { $0.course != "(root)" } }
     var checklist: GettingStartedState? {
         guard filesLoaded, let pe = profileExists else { return nil }
-        let s = GettingStartedState(profile: pe, course: hasCourse, sources: repoSources > 0, assistant: AppSettings.hasOberik)
+        let s = GettingStartedState(profile: pe, course: hasCourse, sources: repoSources > 0, assistant: oberikConfigured)
         if checklistHidden || (s.profile && s.course && s.sources && s.assistant) { return nil }
         return s
     }

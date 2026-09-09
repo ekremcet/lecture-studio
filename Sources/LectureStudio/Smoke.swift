@@ -14,7 +14,7 @@ enum Smoke {
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         var log = ""
         func note(_ s: String) { log += s + "\n"; try? log.write(to: out.appendingPathComponent("smoke.txt"), atomically: true, encoding: .utf8) }
-        if ProcessInfo.processInfo.environment["STUDIO_IMPORT_ENV"] == "1" { AppSettings.importDotEnv(); store.agent.load(); Task { await store.loadModels() } }
+        if ProcessInfo.processInfo.environment["STUDIO_IMPORT_ENV"] == "1" { AppSettings.importDotEnv(); store.oberikSettingsChanged() }
         Task {
             // `STUDIO_WINDOW=WxH` (points) sizes the main window, for screenshots larger than the screen.
             if let spec = ProcessInfo.processInfo.environment["STUDIO_WINDOW"], let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) {

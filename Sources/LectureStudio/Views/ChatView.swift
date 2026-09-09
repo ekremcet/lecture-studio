@@ -119,7 +119,7 @@ struct ChatView: View {
     }
 
     @ViewBuilder var emptyState: some View {
-        if !AppSettings.hasOberik {
+        if !store.oberikConfigured {
             EmptyBlock(icon: "sparkles", title: "Connect the assistant", description: "The assistant runs on an Oberik project you own: outlines, drafts, slide checks and speaker notes from your sources. The guide shows every step with screenshots; then paste the project id and key in Settings. Everything else in the app works without it.") {
                 HStack {
                     Button { NSWorkspace.shared.open(oberikGuideURL) } label: { Label("Setup guide", systemImage: "book") }
