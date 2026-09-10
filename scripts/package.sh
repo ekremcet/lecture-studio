@@ -38,44 +38,26 @@ codesign --force --deep --options runtime --timestamp --entitlements "$root/Pack
 codesign --verify --strict --verbose=2 "$app"
 
 # The disk image opens as the usual install window: the app on the left, a link to Applications on the
-# right, an arrow between them on a drawn background. Finder lays the window out on a writable image
-# (icon positions, view options, background live in its .DS_Store), which is then compressed.
+# right, an arrow between them on a drawn background. The window layout (icon positions, view options,
+# background) is Finder's .DS_Store, kept in Packaging/dmg.DS_Store so every build ships the same window;
+# scripts/dmg-layout.sh regenerates that file when the layout changes. No Finder at build time: a build
+# made while another "Lecture Studio" volume was mounted once laid out the wrong disk and shipped bare.
 dmg="$out/LectureStudio-$version.dmg"
 stage="$out/dmg-stage"
 rm -rf "$stage"; mkdir -p "$stage/.background"
 cp -R "$app" "$stage/"
 ln -s /Applications "$stage/Applications"
 swift "$root/scripts/dmg-background.swift" "$stage/.background/background.png" 560 360 >/dev/null
-rw="$out/LectureStudio-rw.dmg"
-hdiutil create -quiet -volname "Lecture Studio" -srcfolder "$stage" -ov -format UDRW -fs HFS+ "$rw"
-dev="$(hdiutil attach -readwrite -noverify -noautoopen "$rw" | grep -o '/dev/disk[0-9]*' | head -1)"
-osascript <<'EOS'
-tell application "Finder"
-  tell disk "Lecture Studio"
-    open
-    set current view of container window to icon view
-    set toolbar visible of container window to false
-    set statusbar visible of container window to false
-    set pathbar visible of container window to false
-    set the bounds of container window to {200, 200, 760, 560}
-    set theViewOptions to the icon view options of container window
-    set arrangement of theViewOptions to not arranged
-    set icon size of theViewOptions to 128
-    set background picture of theViewOptions to file ".background:background.png"
-    set position of item "Lecture Studio.app" of container window to {150, 170}
-    set position of item "Applications" of container window to {410, 170}
-    close
-    open
-    update without registering applications
-    delay 1
-    close
-  end tell
-end tell
-EOS
-sync
-hdiutil detach "$dev" -quiet
-hdiutil convert -quiet "$rw" -format UDZO -o "$dmg" -ov
-rm -f "$rw"; rm -rf "$stage"
+cp "$root/Packaging/dmg.DS_Store" "$stage/.DS_Store"
+hdiutil create -quiet -volname "Lecture Studio" -srcfolder "$stage" -ov -format UDZO -fs HFS+ "$dmg"
+rm -rf "$stage"
+# The image must carry the window: check before signing.
+check="$out/dmg-check"; mkdir -p "$check"
+hdiutil attach -quiet -nobrowse -readonly -mountpoint "$check" "$dmg"
+for f in .DS_Store .background/background.png Applications "Lecture Studio.app"; do
+  [ -e "$check/$f" ] || { echo "error: '$f' is missing from the disk image" >&2; hdiutil detach -quiet "$check"; exit 1; }
+done
+hdiutil detach -quiet "$check"; rmdir "$check"
 codesign --force --timestamp --sign "$identity" "$dmg"
 
 if [ -n "${NOTARY_PROFILE:-}" ]; then
