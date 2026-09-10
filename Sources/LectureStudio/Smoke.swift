@@ -84,13 +84,42 @@ enum Smoke {
             store.startPresentation()
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             store.presentation.next()
-            // The presenter window sits behind the audience window on a one-screen machine; bring it up so it paints.
-            for w in NSApp.windows where w.title.isEmpty && w.styleMask.contains(.borderless) && w.isVisible { w.level = .normal; w.orderBack(nil) }
-            NSApp.windows.first(where: { $0.title == "Presenter" })?.makeKeyAndOrderFront(nil)
             try? await Task.sleep(nanoseconds: Int(ProcessInfo.processInfo.environment["STUDIO_SMOKE_PRESENT_WAIT"] ?? "") .map { UInt64($0) * 1_000_000_000 } ?? 1_500_000_000)
-            note("presenting=\(store.presentation.presenting) index=\(store.presentation.index) count=\(store.presentation.count) notes=\(store.presentation.notes.count) windows=\(NSApp.windows.filter { $0.isVisible }.map { $0.title })")
+            note("presenting=\(store.presentation.presenting) index=\(store.presentation.index) count=\(store.presentation.count) notes=\(store.presentation.notes.count) singleScreen=\(store.presentation.singleScreen) key=\(NSApp.keyWindow?.title ?? "-") windows=\(NSApp.windows.filter { $0.isVisible }.map { $0.title })")
             let showDir = out.appendingPathComponent("present")
             try? FileManager.default.createDirectory(at: showDir, withIntermediateDirectories: true)
+            // `STUDIO_SMOKE_PRESENT=1` drives the single-screen strip from inside: the events go through
+            // NSApp.sendEvent, so the presenter's monitors see them as they see real input.
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_PRESENT"] == "1", let show = NSApp.windows.first(where: { $0 is ShowWindow }) {
+                let pres = store.presentation
+                @MainActor func shot(_ name: String) async { let r = await Snapshot.captureWindow(show, to: showDir.appendingPathComponent(name)); if !r.isEmpty { note("\(name): \(r)") } }
+                func send(_ e: NSEvent?) { if let e { NSApp.sendEvent(e) } }
+                note("show window: level=\(show.level.rawValue) key=\(show.isKeyWindow) behavior=\(show.collectionBehavior.rawValue) options=\(NSApp.presentationOptions.rawValue) strip=\(pres.stripVisible)")
+                await shot("screen-idle.png")
+                let mid = NSPoint(x: show.frame.width / 2, y: show.frame.height / 2)
+                send(NSEvent.mouseEvent(with: .mouseMoved, location: mid, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: show.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                note("after mouse move: strip=\(pres.stripVisible)")
+                await shot("screen-strip.png")
+                try? await Task.sleep(nanoseconds: 3_500_000_000)
+                note("3.5 s later: strip=\(pres.stripVisible)")
+                pres.startBreak(minutes: 5)
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                note("after Break: break=\(pres.breakUntil != nil)")
+                await shot("screen-break.png")
+                pres.endBreak()
+                pres.togglePresenterWindow()
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                let presenter = NSApp.windows.first { $0.title == "Presenter" }
+                note("notes shown: presenterShown=\(pres.presenterShown) visible=\(presenter?.isVisible ?? false) level=\(presenter?.level.rawValue ?? -1) key=\(NSApp.keyWindow?.title ?? "-")")
+                if let presenter { let r = await Snapshot.captureWindow(presenter, to: showDir.appendingPathComponent("presenter-over-slide.png")); if !r.isEmpty { note("presenter shot: \(r)") } }
+                presenter?.performClose(nil)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                note("after closing notes: presenting=\(pres.presenting) presenterShown=\(pres.presenterShown) visible=\(presenter?.isVisible ?? false) key=\(NSApp.keyWindow?.title ?? "-")")
+                send(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: show.windowNumber, context: nil, characters: "\u{F703}", charactersIgnoringModifiers: "\u{F703}", isARepeat: false, keyCode: 124))
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                note("after right arrow: index=\(pres.index)")
+            }
             for (name, c) in [("show", store.presentation.show), ("current", store.presentation.current), ("next", store.presentation.upcoming)] {
                 if let img = try? await c.webView.takeSnapshot(configuration: nil), let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: showDir.appendingPathComponent("\(name).png")) }
             }

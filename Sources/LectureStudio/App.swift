@@ -53,6 +53,10 @@ struct LectureStudioApp: App {
                         .disabled(!store.canPresent)
                     Button("Next Slide") { store.presentation.next() }.keyboardShortcut(.rightArrow, modifiers: []).disabled(!store.presentation.presenting)
                     Button("Previous Slide") { store.presentation.previous() }.keyboardShortcut(.leftArrow, modifiers: []).disabled(!store.presentation.presenting)
+                    // One screen only: on two the presenter window is always up.
+                    Button(store.presentation.presenterShown ? "Hide Presenter Window" : "Show Presenter Window") { store.presentation.togglePresenterWindow() }
+                        .disabled(!store.presentation.presenting || !store.presentation.singleScreen)
+                    Divider()
                     Button("End Presentation") { store.presentation.stop() }.keyboardShortcut(.escape, modifiers: []).disabled(!store.presentation.presenting)
                 }
             }
@@ -86,25 +90,29 @@ enum Snapshot {
         }
     }
 
+    /// One window as the user sees it (web views included, other windows in front left out), or why not.
+    @MainActor
+    static func captureWindow(_ window: NSWindow, to file: URL) async -> String {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let w = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else { return "window not in shareable content" }
+            let filter = SCContentFilter(desktopIndependentWindow: w)
+            let cfg = SCStreamConfiguration()
+            cfg.width = Int(w.frame.width * window.backingScaleFactor)
+            cfg.height = Int(w.frame.height * window.backingScaleFactor)
+            cfg.showsCursor = false
+            let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+            let rep = NSBitmapImageRep(cgImage: cg)
+            if let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: file) }
+            return ""
+        } catch { return "capture failed: \(error)" }
+    }
+
     @MainActor
     static func capture(to dir: URL) async {
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }), let view = window.contentView else { return }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // ScreenCaptureKit draws the window as the user sees it, web views included.
-        var captureNote = ""
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            if let w = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) {
-                let filter = SCContentFilter(desktopIndependentWindow: w)
-                let cfg = SCStreamConfiguration()
-                cfg.width = Int(w.frame.width * window.backingScaleFactor)
-                cfg.height = Int(w.frame.height * window.backingScaleFactor)
-                cfg.showsCursor = false
-                let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
-                let rep = NSBitmapImageRep(cgImage: cg)
-                if let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: dir.appendingPathComponent("window.png")) }
-            } else { captureNote = "window not in shareable content" }
-        } catch { captureNote = "capture failed: \(error)" }
+        let captureNote = await captureWindow(window, to: dir.appendingPathComponent("window.png"))
         var dump = "\(captureNote)\nwindow=\(window.title) frame=\(window.frame) visible=\(window.isVisible) key=\(window.isKeyWindow) windows=\(NSApp.windows.count)\n"
         func walk(_ v: NSView, _ depth: Int) {
             dump += String(repeating: "  ", count: depth) + "\(type(of: v)) \(v.frame) hidden=\(v.isHidden) layer=\(v.layer != nil)\n"

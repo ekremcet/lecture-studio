@@ -2,12 +2,23 @@ import SwiftUI
 import AppKit
 import StudioCore
 
-/// Presenter mode: a borderless black window with the current slide on the second screen (or this one
-/// when there is only one), and a presenter window with the current slide, the next slide, the speaker
-/// notes, a clock and the slide counter. Arrow keys and space move; Escape ends.
+/// Presenter mode: a borderless black window with the current slide on the second screen, and a presenter
+/// window with the current slide, the next slide, the speaker notes, a clock and the slide counter. Arrow
+/// keys and space move; Escape ends.
+///
+/// With one screen (a laptop alone, or mirrored to the projector) the slide window takes that screen at
+/// the normal window level, so the menu bar still drops down, ⌘Tab still brings another app on top and
+/// the Dock still comes up. A control strip appears over the slide when the mouse moves and hides again
+/// after a few seconds; the presenter window opens over the slide on request instead of at the start.
 @MainActor @Observable
 final class Presentation {
     private(set) var presenting = false
+    /// One screen: the slide window is on the screen the presenter looks at.
+    private(set) var singleScreen = false
+    /// The control strip over the slide (single screen) stays until this time, or while hovered.
+    private(set) var stripUntil: Date?
+    private(set) var stripHovered = false
+    private(set) var presenterShown = false
     private(set) var index = 0
     private(set) var count = 0
     private(set) var startedAt = Date()
@@ -24,6 +35,8 @@ final class Presentation {
     private var showWindow: NSWindow?
     private var presenterWindow: NSWindow?
     private var keyMonitor: Any?
+    private var mouseMonitor: Any?
+    private var stripTimer: Timer?
     private weak var store: StudioStore?
     private var markdown = ""
     private var starts: [Int] = [0]
@@ -71,6 +84,38 @@ final class Presentation {
 
     func endBreak() { breakUntil = nil }
 
+    /// Single screen: show the presenter window over the slide, or hide it again.
+    func togglePresenterWindow() {
+        guard presenting, singleScreen, let p = presenterWindow else { return }
+        if presenterShown { p.orderOut(nil); presenterShown = false; showWindow?.makeKey() }
+        else { p.makeKeyAndOrderFront(nil); presenterShown = true }
+    }
+
+    /// The control strip shows for a few seconds after the mouse moves; the pointer hides when it goes.
+    /// Mouse moves come at event rate, so the timer is only pushed once it has less than a second left.
+    private func showStrip(for seconds: TimeInterval = 3) {
+        if let u = stripUntil, u.timeIntervalSinceNow > seconds - 1 { return }
+        stripUntil = Date().addingTimeInterval(seconds)
+        stripTimer?.invalidate()
+        stripTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.hideStrip() }
+        }
+    }
+
+    private func hideStrip() {
+        guard presenting, singleScreen else { return }
+        if stripHovered { showStrip(); return }
+        stripUntil = nil
+        NSCursor.setHiddenUntilMouseMoves(true)
+    }
+
+    func setStripHovered(_ h: Bool) {
+        stripHovered = h
+        if h { stripUntil = .distantFuture; stripTimer?.invalidate() } else { stripUntil = nil; showStrip() }
+    }
+
+    var stripVisible: Bool { stripUntil.map { $0 > Date() } ?? false }
+
     func next() { guard presenting, index + 1 < count else { return }; index += 1; apply() }
     func previous() { guard presenting, index > 0 else { return }; index -= 1; apply() }
     func go(_ i: Int) { guard presenting, i >= 0, i < count else { return }; index = i; apply() }
@@ -79,6 +124,10 @@ final class Presentation {
         guard presenting else { return }
         presenting = false
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+        if let m = mouseMonitor { NSEvent.removeMonitor(m); mouseMonitor = nil }
+        stripTimer?.invalidate(); stripTimer = nil
+        stripUntil = nil; stripHovered = false; presenterShown = false
+        NSCursor.setHiddenUntilMouseMoves(false)
         NSApp.presentationOptions = []
         showWindow?.orderOut(nil); showWindow = nil
         presenterWindow?.orderOut(nil); presenterWindow = nil
@@ -89,28 +138,61 @@ final class Presentation {
         let screens = NSScreen.screens
         let mainScreen = NSScreen.main ?? screens[0]
         let external = screens.first { $0 != mainScreen } ?? mainScreen
-        // The slide window: borderless, black, above the menu bar of its screen.
-        let w = NSWindow(contentRect: external.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        singleScreen = external == mainScreen
+        // The slide window: borderless, black. On the other screen it sits above that screen's menu bar;
+        // on the only screen it stays at the normal level so the menu bar, the Dock and ⌘Tab keep working.
+        let w = ShowWindow(contentRect: external.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         w.backgroundColor = .black
-        w.level = .init(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
-        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        if singleScreen {
+            w.level = .normal
+            w.collectionBehavior = [.fullScreenAuxiliary, .stationary]
+            w.acceptsMouseMovedEvents = true
+            w.takesKeyboard = true
+        } else {
+            w.level = .init(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
+            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        }
         w.isReleasedWhenClosed = false
         w.contentView = NSHostingView(rootView: ShowView(presentation: self).ignoresSafeArea())
         w.setFrame(external.frame, display: true)
         w.makeKeyAndOrderFront(nil)
         showWindow = w
-        if external == mainScreen { NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock] }
-        // The presenter window on this screen.
+        if singleScreen { NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock] }
+        // The presenter window on this screen. With one screen it would cover the slide, so it waits
+        // behind the strip's Notes button and floats over the slide when asked for.
         let frame = mainScreen.visibleFrame
         let size = NSSize(width: min(1180, frame.width - 80), height: min(720, frame.height - 80))
         let p = NSWindow(contentRect: NSRect(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2, width: size.width, height: size.height), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         p.title = "Presenter"
         p.isReleasedWhenClosed = false
         p.contentView = NSHostingView(rootView: PresenterView(presentation: self))
-        p.makeKeyAndOrderFront(nil)
         presenterWindow = p
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: p, queue: .main) { [weak self] _ in Task { @MainActor in self?.stop() } }
+        if singleScreen {
+            p.level = .floating
+            presenterShown = false
+            showStrip()
+            mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown]) { [weak self] e in
+                if let self, self.presenting, e.window === self.showWindow, !self.stripHovered { self.showStrip() }
+                return e
+            }
+        } else {
+            p.makeKeyAndOrderFront(nil)
+        }
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: p, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                // One screen: closing the notes only puts them away; the slide stays up.
+                if self.singleScreen { self.presenterShown = false; self.showWindow?.makeKey() } else { self.stop() }
+            }
+        }
     }
+}
+
+/// The slide window. On one screen it takes the keyboard, so the strip's field and the presenter keys work
+/// with no other window of the app in front; on two the presenter window keeps it, as before.
+final class ShowWindow: NSWindow {
+    var takesKeyboard = false
+    override var canBecomeKey: Bool { takesKeyboard }
 }
 
 struct PresenterView: View {
@@ -165,28 +247,7 @@ struct PresenterView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    @State private var breakText = "10"
-
-    /// Start a break of N minutes, or end the running one.
-    @ViewBuilder var breakControl: some View {
-        if let until = presentation.breakUntil {
-            TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                let left = max(0, Int(until.timeIntervalSince(ctx.date).rounded(.up)))
-                Text("Break \(String(format: "%d:%02d", left / 60, left % 60))").font(.title3.monospacedDigit()).foregroundStyle(.orange)
-                    .onChange(of: left) { _, v in if v == 0 { presentation.endBreak() } }
-            }
-            Button("End break") { presentation.endBreak() }
-        } else {
-            HStack(spacing: 4) {
-                TextField("min", text: $breakText).frame(width: 36).multilineTextAlignment(.trailing).onSubmit { startBreak() }
-                Button { startBreak() } label: { Label("Break", systemImage: "cup.and.saucer") }.help("Show a countdown on the audience screen for this many minutes")
-            }
-        }
-    }
-
-    func startBreak() {
-        presentation.startBreak(minutes: Int(breakText.trimmed) ?? 10)
-    }
+    var breakControl: some View { BreakControl(presentation: presentation) }
 
     func elapsed(_ now: Date) -> String {
         let s = max(0, Int(now.timeIntervalSince(presentation.startedAt)))
@@ -194,8 +255,64 @@ struct PresenterView: View {
     }
 }
 
+/// The minutes field and Break, or the running countdown and End break. Shared by the presenter window
+/// and the single-screen strip.
+struct BreakControl: View {
+    let presentation: Presentation
+    @State private var breakText = "10"
 
-/// The audience screen: the slide, or the break card while a break runs.
+    var body: some View {
+        if let until = presentation.breakUntil {
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                let left = max(0, Int(until.timeIntervalSince(ctx.date).rounded(.up)))
+                Text("Break \(String(format: "%d:%02d", left / 60, left % 60))").font(.title3.monospacedDigit()).foregroundStyle(.orange)
+                    .onChange(of: left) { _, v in if v == 0 { presentation.endBreak() } }
+            }
+            Button("End break") { presentation.endBreak() }.fixedSize()
+        } else {
+            HStack(spacing: 4) {
+                TextField("min", text: $breakText).frame(width: 40).multilineTextAlignment(.trailing).onSubmit { startBreak() }
+                Button { startBreak() } label: { Label("Break", systemImage: "cup.and.saucer") }.fixedSize()
+                    .help("Show a countdown on the audience screen for this many minutes")
+            }
+        }
+    }
+
+    func startBreak() { presentation.startBreak(minutes: Int(breakText.trimmed) ?? 10) }
+}
+
+/// Single screen: the presenter's controls over the slide, shown while the mouse moves.
+struct ControlStrip: View {
+    let presentation: Presentation
+
+    var body: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 6) {
+                Button { presentation.previous() } label: { Image(systemName: "chevron.left") }.disabled(presentation.index == 0)
+                Text("\(presentation.index + 1) / \(presentation.count)").font(.title3.monospacedDigit())
+                Button { presentation.next() } label: { Image(systemName: "chevron.right") }.disabled(presentation.index + 1 >= presentation.count)
+            }
+            TimelineView(.periodic(from: presentation.startedAt, by: 1)) { ctx in
+                let s = max(0, Int(ctx.date.timeIntervalSince(presentation.startedAt)))
+                Text(String(format: "%02d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)).font(.title3.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            BreakControl(presentation: presentation)
+            Button { presentation.togglePresenterWindow() } label: { Label(presentation.presenterShown ? "Hide notes" : "Notes", systemImage: "text.alignleft") }.fixedSize()
+                .help("The presenter window: the next slide and your notes, over the slide")
+            Button("End", role: .destructive) { presentation.stop() }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.12)))
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
+        .onHover { presentation.setStripHovered($0) }
+    }
+}
+
+/// The audience screen: the slide, or the break card while a break runs. With one screen the control
+/// strip sits at the bottom while the mouse moves.
 struct ShowView: View {
     let presentation: Presentation
 
@@ -204,6 +321,15 @@ struct ShowView: View {
             WebViewHost(webView: presentation.show.webView)
             if let until = presentation.breakUntil {
                 BreakView(presentation: presentation, until: until)
+            }
+            if presentation.singleScreen {
+                VStack {
+                    Spacer()
+                    ControlStrip(presentation: presentation).padding(.bottom, 28)
+                        .opacity(presentation.stripVisible ? 1 : 0)
+                        .allowsHitTesting(presentation.stripVisible)
+                        .animation(.easeOut(duration: 0.2), value: presentation.stripVisible)
+                }
             }
         }
     }
