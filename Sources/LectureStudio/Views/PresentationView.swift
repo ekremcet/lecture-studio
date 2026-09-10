@@ -8,8 +8,9 @@ import StudioCore
 ///
 /// With one screen (a laptop alone, or mirrored to the projector) the slide window takes that screen at
 /// the normal window level, so the menu bar still drops down, ⌘Tab still brings another app on top and
-/// the Dock still comes up. A control strip appears over the slide when the mouse moves and hides again
-/// after a few seconds; the presenter window opens over the slide on request instead of at the start.
+/// the Dock still comes up. A control strip appears over the slide when the pointer reaches the bottom
+/// of the screen and hides again a few seconds after it leaves; the presenter window opens over the slide
+/// on request instead of at the start.
 @MainActor @Observable
 final class Presentation {
     private(set) var presenting = false
@@ -35,7 +36,7 @@ final class Presentation {
     private var showWindow: NSWindow?
     private var presenterWindow: NSWindow?
     private var keyMonitor: Any?
-    private var mouseMonitor: Any?
+    private var pointerTimer: Timer?
     private var stripTimer: Timer?
     private weak var store: StudioStore?
     private var markdown = ""
@@ -91,8 +92,19 @@ final class Presentation {
         else { p.makeKeyAndOrderFront(nil); presenterShown = true }
     }
 
-    /// The control strip shows for a few seconds after the mouse moves; the pointer hides when it goes.
-    /// Mouse moves come at event rate, so the timer is only pushed once it has less than a second left.
+    /// The strip's home: the pointer this close to the bottom of the slide brings it up.
+    static let stripZone: CGFloat = 140
+
+    /// Where the pointer is, in screen coordinates. Polled, not taken from mouse-moved events: those reach
+    /// the slide window only while it is key, and not at all over the web view.
+    func pointer(at p: NSPoint) {
+        guard presenting, singleScreen, let w = showWindow, w.frame.contains(p) else { return }
+        if p.y < w.frame.minY + Self.stripZone { showStrip() }
+    }
+
+    /// The control strip shows for a few seconds once the pointer reaches the bottom; the pointer hides
+    /// when it goes. Polls come ten times a second, so the timer is only pushed once it has less than a
+    /// second left.
     private func showStrip(for seconds: TimeInterval = 3) {
         if let u = stripUntil, u.timeIntervalSinceNow > seconds - 1 { return }
         stripUntil = Date().addingTimeInterval(seconds)
@@ -124,7 +136,7 @@ final class Presentation {
         guard presenting else { return }
         presenting = false
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
-        if let m = mouseMonitor { NSEvent.removeMonitor(m); mouseMonitor = nil }
+        pointerTimer?.invalidate(); pointerTimer = nil
         stripTimer?.invalidate(); stripTimer = nil
         stripUntil = nil; stripHovered = false; presenterShown = false
         NSCursor.setHiddenUntilMouseMoves(false)
@@ -146,7 +158,6 @@ final class Presentation {
         if singleScreen {
             w.level = .normal
             w.collectionBehavior = [.fullScreenAuxiliary, .stationary]
-            w.acceptsMouseMovedEvents = true
             w.takesKeyboard = true
         } else {
             w.level = .init(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
@@ -171,9 +182,8 @@ final class Presentation {
             p.level = .floating
             presenterShown = false
             showStrip()
-            mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown]) { [weak self] e in
-                if let self, self.presenting, e.window === self.showWindow, !self.stripHovered { self.showStrip() }
-                return e
+            pointerTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.pointer(at: NSEvent.mouseLocation) }
             }
         } else {
             p.makeKeyAndOrderFront(nil)
