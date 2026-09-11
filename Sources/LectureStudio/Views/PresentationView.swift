@@ -8,9 +8,9 @@ import StudioCore
 ///
 /// The lecturer sets the lecture clock (the rhythm menu and the Timer button): the teaching and break minutes
 /// of one round, in order — "20 / 5 · 20 / 15" is two blocks, the long break after the second — and whether a
-/// block that runs out hands the room over by itself. A break the clock called is the same break the Break
-/// button gives, and when it ends the clock arms the next block of the rhythm; after the last break the
-/// rhythm starts again. The system-wide defaults live in Settings › Teaching.
+/// block that runs out hands the room over by itself. A break the clock called is the same break ⌘B gives, and
+/// when it ends the clock arms the next block of the rhythm; after the last break the rhythm starts again.
+/// The system-wide defaults live in Settings › Teaching.
 ///
 /// With one screen (a laptop alone, or mirrored to the projector) the slide window takes that screen at
 /// the normal window level, so the menu bar still drops down, ⌘Tab still brings another app on top and
@@ -97,6 +97,10 @@ final class Presentation {
         openWindows()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self, self.presenting else { return e }
+            // The user's shortcuts first (Settings › Shortcuts), then the fixed presenter-remote keys.
+            for a in ShortcutAction.allCases where a.isPresenterKey {
+                if let s = self.store?.shortcut(for: a), s.matches(e) { self.perform(a); return nil }
+            }
             switch e.keyCode {
             case 124, 125, 49, 121, 36: self.next(); return nil      // right, down, space, page down, return
             case 123, 126, 116: self.previous(); return nil          // left, up, page up
@@ -158,13 +162,15 @@ final class Presentation {
             break
         case .startBreak(let minutes):
             startBreak(minutes: minutes)
-            store?.toasts.show(.info, "Break: \(minutes) min", "The audience screen is counting down; End break brings the slide back.")
+            let hint = keyHint(.toggleBreak)
+            store?.toasts.show(.info, "Break: \(minutes) min", hint.isEmpty ? nil : "\(hint) ends it early.")
         case .timeIsUp:
-            store?.toasts.show(.info, "The block is over", "Auto break is off: take the break when you are ready.")
+            let hint = keyHint(.toggleBreak)
+            store?.toasts.show(.info, "The block is over", hint.isEmpty ? "Auto break is off." : "Auto break is off; \(hint) for the break.")
         }
     }
 
-    /// Start a break of `breakMinutes`, or end the running one: the Break button's action.
+    /// Start a break of `breakMinutes`, or end the running one (⌘B by default).
     func toggleBreak() {
         guard presenting else { return }
         if breakUntil != nil { endBreak() } else { startBreak(minutes: breakMinutes) }
@@ -212,6 +218,20 @@ final class Presentation {
     }
 
     var stripVisible: Bool { stripUntil.map { $0 > Date() } ?? false }
+
+    private func perform(_ a: ShortcutAction) {
+        switch a {
+        case .nextSlide: next()
+        case .previousSlide: previous()
+        case .endPresentation: stop()
+        case .toggleBreak: toggleBreak()
+        case .toggleCountdown: toggleCountdown()
+        default: break
+        }
+    }
+
+    /// "⌘B", or "" when the action has no shortcut: for the presenter's labels.
+    func keyHint(_ a: ShortcutAction) -> String { store?.shortcut(for: a)?.display ?? "" }
 
     func next() { guard presenting, index + 1 < count else { return }; index += 1; apply() }
     func previous() { guard presenting, index > 0 else { return }; index -= 1; apply() }
@@ -344,7 +364,13 @@ struct PresenterView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    var hints: String { "← → or space to move, Esc to end" }
+    var hints: String {
+        var parts = ["\(presentation.keyHint(.previousSlide)) \(presentation.keyHint(.nextSlide)) or space to move".trimmed]
+        if !presentation.keyHint(.toggleBreak).isEmpty { parts.append("\(presentation.keyHint(.toggleBreak)) for a break") }
+        if !presentation.keyHint(.toggleCountdown).isEmpty { parts.append("\(presentation.keyHint(.toggleCountdown)) for the lecture timer") }
+        if !presentation.keyHint(.endPresentation).isEmpty { parts.append("\(presentation.keyHint(.endPresentation)) to end") }
+        return parts.joined(separator: ", ")
+    }
 
     var breakControl: some View { BreakControl(presentation: presentation) }
 
@@ -369,16 +395,16 @@ struct BreakControl: View {
                 Text("Break \(String(format: "%d:%02d", left / 60, left % 60))").font(.title3.monospacedDigit()).foregroundStyle(.orange)
                     .onChange(of: left) { _, v in if v == 0 { presentation.endBreak() } }
             }
-            Button("End break") { presentation.endBreak() }.fixedSize()
+            Button("End break" + (presentation.keyHint(.toggleBreak).isEmpty ? "" : " \(presentation.keyHint(.toggleBreak))")) { presentation.endBreak() }.fixedSize()
         } else {
             HStack(spacing: 4) {
-                // Every keystroke lands: Return never reaches this field (it moves the slide), so the Break
-                // button must read what was typed without a commit.
+                // Every keystroke lands: Return never reaches this field (it moves the slide), so ⌘B must
+                // read what was typed without a commit.
                 TextField("min", text: $breakText).frame(width: 40).multilineTextAlignment(.trailing)
                     .onAppear { breakText = String(presentation.breakMinutes) }
                     .onChange(of: breakText) { _, v in if let n = Int(v.trimmed) { presentation.breakMinutes = max(1, min(180, n)) } }
                 Button { presentation.toggleBreak() } label: {
-                    Label("Break", systemImage: "cup.and.saucer")
+                    Label("Break" + (presentation.keyHint(.toggleBreak).isEmpty ? "" : " \(presentation.keyHint(.toggleBreak))"), systemImage: "cup.and.saucer")
                 }
                 .fixedSize()
                 .help("Show a countdown on the audience screen for this many minutes")
@@ -403,11 +429,11 @@ struct CountdownControl: View {
                         .foregroundStyle(presentation.countdown.counting && presentation.autoBreak ? Color.orange : Color.secondary)
                         .help(presentation.autoBreak ? "The break goes up on the audience screen by itself when this block runs out" : "Auto break is off: this counts the block down, and the break is yours to start")
                 }
-                Button("Stop timer") { presentation.stopCountdown() }.fixedSize()
+                Button("Stop timer" + hint) { presentation.stopCountdown() }.fixedSize()
             } else {
                 rhythmMenu
                 Button { presentation.toggleCountdown() } label: {
-                    Label("Timer", systemImage: "timer")
+                    Label("Timer" + hint, systemImage: "timer")
                 }
                 .fixedSize()
                 .help("Walk this lecture's rhythm: count each block down and hand over to the break after it")
@@ -442,6 +468,9 @@ struct CountdownControl: View {
         .fixedSize()
         .help("\(presentation.format.name): \(presentation.lecturePlan.compact), teaching and break minutes in order, and it repeats. Pick another format for this lecture; Settings › Teaching holds the list and the default.")
     }
+
+    /// The shortcut only earns its place in the label when the lecturer has set one.
+    private var hint: String { presentation.keyHint(.toggleCountdown).isEmpty ? "" : " \(presentation.keyHint(.toggleCountdown))" }
 }
 
 /// A format as the presenter names it: its symbol and its name. (A menu item shows no second line on
@@ -480,7 +509,7 @@ struct ControlStrip: View {
             BreakControl(presentation: presentation)
             Button { presentation.togglePresenterWindow() } label: { Label(presentation.presenterShown ? "Hide notes" : "Notes", systemImage: "text.alignleft") }.fixedSize()
                 .help("The presenter window: the next slide and your notes, over the slide")
-            Button("End", role: .destructive) { presentation.stop() }
+            Button("End" + (presentation.keyHint(.endPresentation).isEmpty ? "" : " \(presentation.keyHint(.endPresentation))"), role: .destructive) { presentation.stop() }
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)

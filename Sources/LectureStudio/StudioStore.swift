@@ -88,6 +88,7 @@ final class StudioStore {
     var lecturePlan: LecturePlan { lectureFormat.plan }
     var lectureBreakMinutes = AppSettings.breakMinutes
     var autoBreak = AppSettings.autoBreak
+    var shortcuts = ShortcutTable(overrides: AppSettings.shortcuts)
     var hiddenPanels: Set<PanelId> = Set(AppSettings.hiddenPanels.compactMap(PanelId.init(rawValue:)))
     /// Width of each panel as a share of the workspace; kept per panel, so moving a panel keeps its width.
     var panelFractions: [PanelId: CGFloat] = {
@@ -572,6 +573,28 @@ final class StudioStore {
     func setAutoBreak(_ on: Bool) {
         autoBreak = on
         AppSettings.autoBreak = on
+    }
+
+    // MARK: keyboard shortcuts
+
+    func shortcut(for a: ShortcutAction) -> Shortcut? { shortcuts.shortcut(for: a) }
+
+    func setShortcut(_ s: Shortcut?, for a: ShortcutAction) {
+        shortcuts.set(s, for: a)
+        AppSettings.shortcuts = shortcuts.overrides
+    }
+
+    func resetShortcuts() {
+        shortcuts = ShortcutTable()
+        AppSettings.shortcuts = [:]
+    }
+
+    func shortcutAction(for p: PanelId) -> ShortcutAction {
+        switch p {
+        case .chat: .toggleChat
+        case .preview: .togglePreview
+        case .editor: .toggleEditor
+        }
     }
 
     // MARK: agent tool host (the client tools declared in web-core/src/shared/tools.ts)

@@ -23,19 +23,20 @@ struct LectureStudioApp: App {
             CommandGroup(replacing: .windowList) {}
             CommandGroup(after: .saveItem) {
                 Button("Save") { Task { await store.save() } }
-                    .keyboardShortcut("s", modifiers: .command)
+                    .keyboardShortcut(store.shortcut(for: .save)?.keyboardShortcut)
                     .disabled(!store.dirty)
             }
             // Menus follow the screen: View and Present exist only in the workspace.
             if store.stage == .work {
                 CommandMenu("View") {
-                    Button("Refresh Library") { Task { await store.refreshLibrary() } }.keyboardShortcut("r", modifiers: .command)
+                    Button("Refresh Library") { Task { await store.refreshLibrary() } }.keyboardShortcut(store.shortcut(for: .refreshLibrary)?.keyboardShortcut)
                     Divider()
                     ForEach(PanelId.allCases) { p in
                         Toggle(p.rawValue.capFirst, isOn: Binding(get: { !store.hiddenPanels.contains(p) }, set: { _ in store.togglePanel(p) }))
-                            .keyboardShortcut(KeyEquivalent(Character(String(PanelId.allCases.firstIndex(of: p)! + 1))), modifiers: [.command, .option])
+                            .keyboardShortcut(store.shortcut(for: store.shortcutAction(for: p))?.keyboardShortcut)
                     }
                     Toggle("Speaker Notes", isOn: Binding(get: { store.showNotes }, set: { _ in store.toggleNotes() }))
+                        .keyboardShortcut(store.shortcut(for: .toggleNotes)?.keyboardShortcut)
                     Divider()
                     Button("Reset Layout") { store.resetLayout() }
                     Divider()
@@ -49,20 +50,20 @@ struct LectureStudioApp: App {
             if store.stage == .work {
                 CommandMenu("Present") {
                     Button("Start Presenting") { store.startPresentation() }
-                        .keyboardShortcut("p", modifiers: [.command, .option])
+                        .keyboardShortcut(store.shortcut(for: .startPresenting)?.keyboardShortcut)
                         .disabled(!store.canPresent)
-                    Button("Next Slide") { store.presentation.next() }.keyboardShortcut(.rightArrow, modifiers: []).disabled(!store.presentation.presenting)
-                    Button("Previous Slide") { store.presentation.previous() }.keyboardShortcut(.leftArrow, modifiers: []).disabled(!store.presentation.presenting)
+                    Button("Next Slide") { store.presentation.next() }.keyboardShortcut(store.shortcut(for: .nextSlide)?.keyboardShortcut).disabled(!store.presentation.presenting)
+                    Button("Previous Slide") { store.presentation.previous() }.keyboardShortcut(store.shortcut(for: .previousSlide)?.keyboardShortcut).disabled(!store.presentation.presenting)
                     // One screen only: on two the presenter window is always up.
                     Button(store.presentation.presenterShown ? "Hide Presenter Window" : "Show Presenter Window") { store.presentation.togglePresenterWindow() }
                         .disabled(!store.presentation.presenting || !store.presentation.singleScreen)
                     Divider()
                     Button(store.presentation.breakUntil == nil ? "Take a Break" : "End Break") { store.presentation.toggleBreak() }
-                        .disabled(!store.presentation.presenting)
+                        .keyboardShortcut(store.shortcut(for: .toggleBreak)?.keyboardShortcut).disabled(!store.presentation.presenting)
                     Button(store.presentation.countdown.running ? "Stop the Lecture Timer" : "Start the Lecture Timer") { store.presentation.toggleCountdown() }
-                        .disabled(!store.presentation.presenting || store.presentation.breakUntil != nil)
+                        .keyboardShortcut(store.shortcut(for: .toggleCountdown)?.keyboardShortcut).disabled(!store.presentation.presenting || store.presentation.breakUntil != nil)
                     Divider()
-                    Button("End Presentation") { store.presentation.stop() }.keyboardShortcut(.escape, modifiers: []).disabled(!store.presentation.presenting)
+                    Button("End Presentation") { store.presentation.stop() }.keyboardShortcut(store.shortcut(for: .endPresentation)?.keyboardShortcut).disabled(!store.presentation.presenting)
                 }
             }
         }
@@ -83,6 +84,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Snapshot.start()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// ⌘Q asks first. A stray ⌘Q while typing would otherwise drop the session, and the deck's unsaved
+    /// edits with it, so the dirty deck also gets a "Save and Quit".
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let store = StudioStore.shared
+        // Closing the window is already a deliberate exit; only unsaved edits still warrant a question.
+        if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }), !store.dirty { return .terminateNow }
+        // The slide window floats above the alert level; end the show so the question is visible.
+        if store.presentation.presenting { store.presentation.stop() }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        if store.dirty {
+            alert.messageText = "Quit Lecture Studio?"
+            alert.informativeText = "\(store.filePath) has unsaved changes."
+            alert.addButton(withTitle: "Save and Quit")
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Quit Without Saving")
+        } else {
+            alert.messageText = "Quit Lecture Studio?"
+            alert.addButton(withTitle: "Quit")
+            alert.addButton(withTitle: "Cancel")
+        }
+        alert.buttons[1].keyEquivalent = "\u{1b}"
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            guard store.dirty else { return .terminateNow }
+            Task { @MainActor in
+                await store.save()
+                // Save reports its own failure as a toast; do not quit over a deck it could not write.
+                NSApp.reply(toApplicationShouldTerminate: !store.dirty)
+            }
+            return .terminateLater
+        case .alertThirdButtonReturn: return .terminateNow
+        default: return .terminateCancel
+        }
+    }
 }
 
 /// Development aid: `STUDIO_SNAPSHOT=/dir` writes the main window and its web views to PNG files

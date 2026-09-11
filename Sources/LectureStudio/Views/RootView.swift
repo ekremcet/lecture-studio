@@ -88,6 +88,7 @@ struct SettingsView: View {
     @State private var subject = AppSettings.subject
     @State private var status = ""
     @State private var testing = false
+    @State private var shortcutMessage = ""
     @State private var formats: [LectureFormat] = []
     @State private var breakText = String(AppSettings.breakMinutes)
 
@@ -96,6 +97,7 @@ struct SettingsView: View {
             Form { librarySection }.formStyle(.grouped).tabItem { Label("Library", systemImage: "folder") }
             Form { teachingSection }.formStyle(.grouped).tabItem { Label("Teaching", systemImage: "timer") }
             Form { oberikSection }.formStyle(.grouped).tabItem { Label("Agent", systemImage: "sparkles") }
+            Form { shortcutsSection }.formStyle(.grouped).tabItem { Label("Shortcuts", systemImage: "keyboard") }
         }
         .frame(width: 540, height: 500)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
@@ -132,7 +134,7 @@ struct SettingsView: View {
         Section {
             LabeledContent("Hand-started break") {
                 HStack(spacing: 4) {
-                    TextField("10", text: $breakText).frame(width: 56).multilineTextAlignment(.trailing)
+                    TextField("10", text: $breakText).labelsHidden().frame(width: 56).multilineTextAlignment(.trailing)
                         .onChange(of: breakText) { _, v in if let n = Int(v.trimmed) { store.setLectureBreakMinutes(n) } }
                     Text("min")
                 }
@@ -141,7 +143,7 @@ struct SettingsView: View {
         } header: {
             Text("Breaks")
         } footer: {
-            Text("A break the rhythm calls lasts as long as the rhythm says; this is the length of one you start yourself with the Break button. With auto break off the block still counts down, and you decide when the break comes.")
+            Text("A break the rhythm calls lasts as long as the rhythm says; this is the length of one you start yourself with \(store.shortcut(for: .toggleBreak)?.display ?? "the Break button"). With auto break off the block still counts down, and you decide when the break comes.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -179,6 +181,25 @@ struct SettingsView: View {
                         }
                     }
                 }
+            }
+    }
+
+    @ViewBuilder var shortcutsSection: some View {
+            Section {
+                ForEach(ShortcutAction.allCases) { a in
+                    LabeledContent(a.title) { ShortcutRecorder(action: a, message: $shortcutMessage) }
+                }
+            } header: {
+                Text("Keyboard shortcuts")
+            } footer: {
+                Text("Click a shortcut and type the new one. Escape keeps the old one, Delete removes it. Menus follow the change at once.").font(.caption).foregroundStyle(.secondary)
+            }
+            if !shortcutMessage.isEmpty {
+                Section { Text(shortcutMessage).font(.callout).foregroundStyle(.orange) }
+            }
+            Section {
+                Button("Reset all to defaults") { store.resetShortcuts(); shortcutMessage = "" }
+                    .disabled(store.shortcuts.overrides.isEmpty)
             }
     }
 

@@ -108,11 +108,14 @@ enum Smoke {
                 await shot("screen-strip.png")
                 try? await Task.sleep(nanoseconds: 3_500_000_000)
                 note("3.5 s later: strip=\(pres.stripVisible)")
-                pres.startBreak(minutes: 5)
+                let cmdB = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: show.windowNumber, context: nil, characters: "b", charactersIgnoringModifiers: "b", isARepeat: false, keyCode: 11)
+                send(cmdB)
                 try? await Task.sleep(nanoseconds: 700_000_000)
-                note("after Break: break=\(pres.breakUntil != nil)")
+                note("after ⌘B: break=\(pres.breakUntil != nil)")
                 await shot("screen-break.png")
-                pres.endBreak()
+                send(cmdB)
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                note("after second ⌘B: break=\(pres.breakUntil != nil)")
                 // The lecture clock: armed by hand, then stepped past the end of each block, so the breaks that
                 // follow are the clock's own doing and the smoke does not sit out a whole lecture.
                 let rhythm = pres.lecturePlan.text
@@ -144,6 +147,29 @@ enum Smoke {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 note("after right arrow: index=\(pres.index)")
             }
+            // `STUDIO_SMOKE_HOLD=<seconds>` keeps the presentation up, so keys, ⌘Tab and the menu bar can be
+            // tried from outside (osascript, screencapture) on the single-screen arrangement.
+            if let hold = ProcessInfo.processInfo.environment["STUDIO_SMOKE_HOLD"].flatMap(Double.init), hold > 0 {
+                note("holding the presentation for \(Int(hold)) s")
+                var last = store.presentation.stripVisible
+                // `STUDIO_SMOKE_STRIP=1` keeps the strip up through the hold, for a click from outside.
+                let keepStrip = ProcessInfo.processInfo.environment["STUDIO_SMOKE_STRIP"] == "1"
+                for i in 0..<Int(hold * 10) {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    if keepStrip, i % 10 == 0, let show = NSApp.windows.first(where: { $0 is ShowWindow }) { store.presentation.pointer(at: NSPoint(x: show.frame.midX, y: show.frame.minY + 20)) }
+                    let v = store.presentation.stripVisible
+                    if v != last { last = v; note("strip=\(v) pointer=\(NSEvent.mouseLocation)") }
+                }
+                note("after hold: presenting=\(store.presentation.presenting) index=\(store.presentation.index) break=\(store.presentation.breakUntil != nil) presenterShown=\(store.presentation.presenterShown) key=\(NSApp.keyWindow?.title ?? "-")")
+            }
+            for (name, c) in [("show", store.presentation.show), ("current", store.presentation.current), ("next", store.presentation.upcoming)] {
+                if let img = try? await c.webView.takeSnapshot(configuration: nil), let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: showDir.appendingPathComponent("\(name).png")) }
+            }
+            store.presentation.stop()
+            // Settings › Teaching holds the rhythm the next lecture starts with: open the pane and click its
+            // second tab, because the picture is the only check that it reads as a lecturer would want it.
+            let pane = await Smoke.settingsPane(to: out)
+            note("settings pane: \(pane)")
             for (name, c) in [("show", store.presentation.show), ("current", store.presentation.current), ("next", store.presentation.upcoming)] {
                 if let img = try? await c.webView.takeSnapshot(configuration: nil), let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: showDir.appendingPathComponent("\(name).png")) }
             }
@@ -321,6 +347,66 @@ enum Smoke {
         if let f = v as? NSTextField, f.isEditable { return f }
         for sub in v.subviews { if let f = firstTextField(in: sub) { return f } }
         return nil
+    }
+
+
+    /// Open the Settings pane and picture it: what a lecturer reads there (the rhythm, the break) is worth a
+    /// look, and the default pane carries the tab bar that names the others. Returns what it saw.
+    @MainActor
+    static func settingsPane(to dir: URL) async -> String {
+        openSettings()
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let visible = NSApp.windows.filter { $0.isVisible }
+        let titles = visible.map { "\($0.title) \(Int($0.frame.width))x\(Int($0.frame.height))" }.joined(separator: " | ")
+        guard let w = visible.first(where: { $0.title.localizedCaseInsensitiveContains("settings") }) ?? visible.last else {
+            return "no window to picture"
+        }
+        var out = "visible[\(titles)] pictured=\(w.title)"
+        if !windowShot(w, to: dir.appendingPathComponent("settings-pane.png")) { out += " first shot failed" }
+        // Try the keyboard route to a tab (⌘1, ⌘2…): a click into the system-drawn tab bar wedges the app —
+        // AppKit starts a tracking loop waiting for a mouse-up that never comes — and the smoke drives the rest
+        // of the app with key events anyway. Which pane each shot holds is the picture's business, not the name's.
+        press(window: w, keyCode: 19, flags: .command)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        if !windowShot(w, to: dir.appendingPathComponent("settings-cmd2.png")) { out += " second shot failed" }
+        return out
+    }
+
+    /// A key press into one of the app's own windows, through the app's event loop.
+    static func press(window: NSWindow, keyCode: UInt16, flags: NSEvent.ModifierFlags = []) {
+        for down in [true, false] {
+            guard let e = NSEvent.keyEvent(with: down ? .keyDown : .keyUp, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: keyCode) else { continue }
+            NSApp.sendEvent(e)
+            usleep(40_000)
+        }
+    }
+
+    /// A picture of one of the app's own windows, drawn by the app itself. `cacheDisplay` needs no
+    /// screen-recording permission and no second capture client to share the screen with, which is all the
+    /// settings pane needs: it holds no web view (those only come out through `Snapshot.captureWindow`).
+    @MainActor
+    static func windowShot(_ w: NSWindow, to file: URL) -> Bool {
+        guard let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return false }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? png.write(to: file)) != nil
+    }
+
+    /// Open Settings the way the app menu does. There is no public call for the Settings scene (the selector
+    /// behind `SettingsLink` differs between macOS versions), so the menu item performs itself.
+    @MainActor
+    private static func openSettings() {
+        func find(_ menu: NSMenu) -> NSMenuItem? {
+            for item in menu.items {
+                if let sub = item.submenu, let hit = find(sub) { return hit }
+                if item.title.localizedCaseInsensitiveContains("settings"), item.action != nil { return item }
+            }
+            return nil
+        }
+        if let item = NSApp.mainMenu.flatMap(find), let action = item.action {
+            NSApp.sendAction(action, to: item.target, from: item)
+        }
     }
 
     static func cpuSeconds() -> Double {

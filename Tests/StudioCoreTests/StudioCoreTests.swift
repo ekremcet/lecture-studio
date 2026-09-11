@@ -584,3 +584,52 @@ final class LectureFormatTests: XCTestCase {
         XCTAssertEqual(LectureFormat(name: "x", rhythm: "20 5 20").plan.text, "20 5 20 5", "a half-typed rhythm still reads as a plan")
     }
 }
+
+final class ShortcutTests: XCTestCase {
+    func testRoundTrip() {
+        for s in [Shortcut("b", .command), Shortcut("p", [.command, .option]), Shortcut("right"), Shortcut("escape"), Shortcut("+", .command), Shortcut("f5", [.control, .shift])] {
+            XCTAssertEqual(Shortcut.decode(s.encode()), s, s.encode())
+        }
+        XCTAssertEqual(Shortcut("p", [.command, .option]).encode(), "opt+cmd+p")
+        XCTAssertNil(Shortcut.decode(""))
+        XCTAssertNil(Shortcut.decode("cmd+"))
+        XCTAssertNil(Shortcut.decode("meta+b"))
+        XCTAssertNil(Shortcut.decode("cmd+bb"))
+    }
+
+    func testDisplay() {
+        XCTAssertEqual(Shortcut("b", .command).display, "⌘B")
+        XCTAssertEqual(Shortcut("right", [.control, .option, .shift, .command]).display, "⌃⌥⇧⌘→")
+        XCTAssertEqual(Shortcut("escape").display, "⎋")
+    }
+
+    func testUsable() {
+        XCTAssertTrue(Shortcut("b", .command).isUsable)
+        XCTAssertTrue(Shortcut("f5").isUsable)
+        XCTAssertFalse(Shortcut("s").isUsable)
+        XCTAssertFalse(Shortcut("s", .shift).isUsable)
+    }
+
+    func testDefaultsAreDistinct() {
+        let all = ShortcutAction.allCases.compactMap(\.defaultShortcut)
+        XCTAssertEqual(Set(all).count, all.count)
+        for a in ShortcutAction.allCases { XCTAssertTrue(a.defaultShortcut?.isUsable ?? true, a.title) }
+    }
+
+    func testTable() {
+        var t = ShortcutTable()
+        XCTAssertEqual(t.shortcut(for: .toggleBreak), Shortcut("b", .command))
+        t.set(Shortcut("k", .command), for: .toggleBreak)
+        XCTAssertEqual(t.shortcut(for: .toggleBreak), Shortcut("k", .command))
+        XCTAssertFalse(t.isDefault(.toggleBreak))
+        XCTAssertEqual(t.owner(of: Shortcut("k", .command)), .toggleBreak)
+        XCTAssertNil(t.owner(of: Shortcut("k", .command), except: .toggleBreak))
+        t.set(nil, for: .save)
+        XCTAssertNil(t.shortcut(for: .save))
+        XCTAssertEqual(t.overrides["save"], "")
+        t.set(Shortcut("b", .command), for: .toggleBreak)
+        XCTAssertTrue(t.isDefault(.toggleBreak))
+        t.reset(.save)
+        XCTAssertEqual(t.shortcut(for: .save), Shortcut("s", .command))
+    }
+}

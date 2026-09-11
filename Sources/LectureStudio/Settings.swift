@@ -74,6 +74,11 @@ enum AppSettings {
         get { defaults.stringArray(forKey: "courseOrder") ?? [] }
         set { defaults.set(newValue, forKey: "courseOrder") }
     }
+    /// The user's keyboard shortcuts: action → encoded shortcut, "" for none. Absent means the default.
+    static var shortcuts: [String: String] {
+        get { defaults.dictionary(forKey: "shortcuts") as? [String: String] ?? [:] }
+        set { defaults.set(newValue, forKey: "shortcuts") }
+    }
     static var checklistHidden: Bool {
         get { defaults.bool(forKey: "gettingStartedHidden") }
         set { defaults.set(newValue, forKey: "gettingStartedHidden") }
