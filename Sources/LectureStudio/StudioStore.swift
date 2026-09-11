@@ -79,6 +79,11 @@ final class StudioStore {
     var previewError: String?
     var current = 0
     var showNotes = AppSettings.showNotes
+    /// Presenter mode's defaults, system wide: the rhythm every lecture starts with, the break a
+    /// hand-started Break lasts, and whether a block that runs out hands the room over by itself.
+    var lecturePlan = LecturePlan(AppSettings.lecturePlan)
+    var lectureBreakMinutes = AppSettings.breakMinutes
+    var autoBreak = AppSettings.autoBreak
     var hiddenPanels: Set<PanelId> = Set(AppSettings.hiddenPanels.compactMap(PanelId.init(rawValue:)))
     /// Width of each panel as a share of the workspace; kept per panel, so moving a panel keeps its width.
     var panelFractions: [PanelId: CGFloat] = {
@@ -526,6 +531,26 @@ final class StudioStore {
     func toggleNotes() {
         showNotes.toggle()
         AppSettings.showNotes = showNotes
+    }
+
+    // MARK: the lecture clock's defaults
+
+    /// The rhythm every lecture starts with: teaching and break minutes in order. Presenter mode can run
+    /// another one for a single lecture without coming back here.
+    func setLecturePlan(_ p: LecturePlan) {
+        lecturePlan = p
+        AppSettings.lecturePlan = p.text
+    }
+
+    /// How long a break the lecturer starts by hand lasts.
+    func setLectureBreakMinutes(_ n: Int) {
+        lectureBreakMinutes = LecturePlan.clamp(n)
+        AppSettings.breakMinutes = lectureBreakMinutes
+    }
+
+    func setAutoBreak(_ on: Bool) {
+        autoBreak = on
+        AppSettings.autoBreak = on
     }
 
     // MARK: agent tool host (the client tools declared in web-core/src/shared/tools.ts)

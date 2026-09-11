@@ -57,6 +57,11 @@ struct LectureStudioApp: App {
                     Button(store.presentation.presenterShown ? "Hide Presenter Window" : "Show Presenter Window") { store.presentation.togglePresenterWindow() }
                         .disabled(!store.presentation.presenting || !store.presentation.singleScreen)
                     Divider()
+                    Button(store.presentation.breakUntil == nil ? "Take a Break" : "End Break") { store.presentation.toggleBreak() }
+                        .disabled(!store.presentation.presenting)
+                    Button(store.presentation.countdown.running ? "Stop the Lecture Timer" : "Start the Lecture Timer") { store.presentation.toggleCountdown() }
+                        .disabled(!store.presentation.presenting || store.presentation.breakUntil != nil)
+                    Divider()
                     Button("End Presentation") { store.presentation.stop() }.keyboardShortcut(.escape, modifiers: []).disabled(!store.presentation.presenting)
                 }
             }

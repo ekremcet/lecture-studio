@@ -400,3 +400,150 @@ final class ChatArchiveTests: XCTestCase {
         XCTAssertEqual(ArchivedChat.title(for: [ChatMessage(role: .user, content: long)]).count, 72)
     }
 }
+
+/// The rhythm itself: the text the lecturer types, what it means, and how it is spoken back to them.
+final class LecturePlanTests: XCTestCase {
+    func testParseAcceptsWhateverTheLecturerTypes() {
+        XCTAssertEqual(LecturePlan("20 5 20 15").lengths, [20, 5, 20, 15])
+        XCTAssertEqual(LecturePlan("20, 5, 20, 15").lengths, [20, 5, 20, 15])
+        XCTAssertEqual(LecturePlan("20/5 20/15").lengths, [20, 5, 20, 15])
+        XCTAssertEqual(LecturePlan("").lengths, [20, 5, 20, 15], "nothing typed is the default rhythm")
+        XCTAssertEqual(LecturePlan("   ").lengths, [20, 5, 20, 15])
+        XCTAssertEqual(LecturePlan("45").lengths, [45, 10], "a lone block still needs a break")
+        XCTAssertEqual(LecturePlan("20 5 20").lengths, [20, 5, 20, 5], "a trailing block gets the break before it")
+        XCTAssertEqual(LecturePlan("0 999 7 3").lengths, [1, 180, 7, 3], "minutes are clamped to 1…180")
+        XCTAssertEqual(LecturePlan("1 1 1 1 1 1 1 1 1 1 1 1 1 1").lengths.count, 12, "six blocks is the ceiling")
+    }
+
+    func testTextRoundTrips() {
+        for p in LecturePlan.presets {
+            XCTAssertEqual(LecturePlan(p.text).text, p.text, p.title)
+        }
+        XCTAssertEqual(Set(LecturePlan.presets.map(\.text)).count, LecturePlan.presets.count, "presets are distinct")
+        XCTAssertEqual(LecturePlan.presets.first?.text, LecturePlan.defaultText, "the app's own rhythm comes first")
+        XCTAssertEqual(LecturePlan.clamp(0), 1)
+        XCTAssertEqual(LecturePlan.clamp(999), 180)
+    }
+
+    func testHowARhythmReads() {
+        let p = LecturePlan("20 5 20 15")
+        XCTAssertEqual(p.text, "20 5 20 15")
+        XCTAssertEqual(p.compact, "20 / 5 · 20 / 15")
+        XCTAssertEqual(p.summary, "teaching 20 min, break 5 min, teaching 20 min, break 15 min")
+        XCTAssertEqual(p.roundMinutes, 60)
+        XCTAssertEqual(p.blocks, 2)
+    }
+}
+
+/// The lecturer's clock: a block counts down, the break after it takes over on its own (or does not), and the
+/// break's end arms the next block of the rhythm.
+final class LectureCountdownTests: XCTestCase {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    let plan = LecturePlan("20 5 20 15")
+
+    func testWalksThePlanAndStartsOver() {
+        var c = LectureCountdown(plan: plan)
+        XCTAssertFalse(c.running)
+        XCTAssertFalse(c.counting)
+        XCTAssertNil(c.until)
+        XCTAssertEqual(c.blocks, 2)
+        c.start(now: t0)
+        XCTAssertTrue(c.counting)
+        XCTAssertEqual(c.block, 1)
+        XCTAssertEqual(c.blockMinutes, 20)
+        XCTAssertEqual(c.nextBreakMinutes, 5)
+        XCTAssertEqual(c.until, t0.addingTimeInterval(1200))
+        XCTAssertEqual(c.secondsLeft(now: t0), 1200)
+        XCTAssertEqual(c.secondsLeft(now: t0.addingTimeInterval(60)), 1140)
+        // Nothing happens while the block runs, and the block is over exactly once.
+        XCTAssertEqual(c.tick(now: t0.addingTimeInterval(1199)), .none)
+        XCTAssertEqual(c.tick(now: t0.addingTimeInterval(1200)), .startBreak(minutes: 5))
+        XCTAssertEqual(c.tick(now: t0.addingTimeInterval(1201)), .none)
+        // The break has the room: the clock is on but not counting, so no second break can start.
+        XCTAssertTrue(c.running)
+        XCTAssertFalse(c.counting)
+        XCTAssertNil(c.until)
+        XCTAssertNil(c.secondsLeft(now: t0.addingTimeInterval(1300)))
+        XCTAssertEqual(c.block, 1)
+        // Its end arms the second block, which hands over to the longer break.
+        XCTAssertEqual(c.resume(now: t0.addingTimeInterval(1500)), t0.addingTimeInterval(2700))
+        XCTAssertEqual(c.block, 2)
+        XCTAssertEqual(c.blockMinutes, 20)
+        XCTAssertEqual(c.nextBreakMinutes, 15)
+        XCTAssertEqual(c.tick(now: t0.addingTimeInterval(2700)), .startBreak(minutes: 15))
+        // After the last break of the plan the first block starts again.
+        XCTAssertEqual(c.resume(now: t0.addingTimeInterval(3600)), t0.addingTimeInterval(4800))
+        XCTAssertEqual(c.index, 0)
+        XCTAssertEqual(c.block, 1)
+        XCTAssertEqual(c.until, t0.addingTimeInterval(4800))
+    }
+
+    func testInterruptedBlockKeepsItsSeconds() {
+        var c = LectureCountdown(plan: plan)
+        c.start(now: t0)
+        // Ten minutes into the block the lecturer takes a break of their own.
+        c.suspend(now: t0.addingTimeInterval(600))
+        XCTAssertEqual(c.pausedLeft, 600)
+        XCTAssertNil(c.until)
+        XCTAssertEqual(c.block, 1)
+        // The break's end gives the block back its ten minutes, in the same block of the plan.
+        XCTAssertEqual(c.resume(now: t0.addingTimeInterval(900)), t0.addingTimeInterval(1500))
+        XCTAssertEqual(c.block, 1, "a stretch mid-block does not move the lecture on")
+        XCTAssertEqual(c.secondsLeft(now: t0.addingTimeInterval(900)), 600)
+        // A break the clock called does not give anything back: that block is spent.
+        XCTAssertEqual(c.tick(now: t0.addingTimeInterval(1500)), .startBreak(minutes: 5))
+        XCTAssertNil(c.pausedLeft)
+        XCTAssertEqual(c.resume(now: t0.addingTimeInterval(1800)), t0.addingTimeInterval(3000))
+        XCTAssertEqual(c.block, 2)
+    }
+
+    func testAutoBreakOffLeavesTheBreakToTheLecturer() {
+        var c = LectureCountdown(plan: plan, autoBreak: false)
+        c.start(now: t0)
+        XCTAssertEqual(c.tick(now: t0.addingTimeInterval(1200)), .timeIsUp)
+        XCTAssertFalse(c.running)
+        XCTAssertFalse(c.counting)
+        XCTAssertNil(c.resume(now: t0.addingTimeInterval(1500)))
+        // The block is spent: starting again begins the second block of the plan, not this one again.
+        XCTAssertEqual(c.block, 2)
+        c.start(now: t0.addingTimeInterval(1500))
+        XCTAssertEqual(c.block, 2)
+        XCTAssertEqual(c.until, t0.addingTimeInterval(1500 + 1200))
+    }
+
+    func testStopKeepsThePlaceAndResetDoesNot() {
+        var c = LectureCountdown(plan: plan)
+        c.start(now: t0)
+        c.tick(now: t0.addingTimeInterval(1200))          // into the first break
+        c.resume(now: t0.addingTimeInterval(1500))        // second block, counting
+        c.stop()
+        XCTAssertFalse(c.running)
+        XCTAssertNil(c.until)
+        XCTAssertEqual(c.block, 2)
+        XCTAssertNil(c.resume(now: t0.addingTimeInterval(2000)), "a clock the lecturer stopped stays stopped")
+        c.start(now: t0.addingTimeInterval(2000))
+        XCTAssertEqual(c.block, 2, "starting again picks the lecture up where it was")
+        c.reset()
+        XCTAssertFalse(c.running)
+        XCTAssertEqual(c.block, 1)
+        XCTAssertEqual(c.index, 0)
+    }
+
+    func testChangingTheRhythmKeepsTheBlockInProgress() {
+        var c = LectureCountdown(plan: plan)
+        c.start(now: t0)
+        c.tick(now: t0.addingTimeInterval(1200))
+        c.resume(now: t0.addingTimeInterval(1500))        // second block of the old plan, until 2700
+        c.use(LecturePlan("45 15 45 20"))
+        XCTAssertEqual(c.block, 2, "the place in the rhythm is kept")
+        XCTAssertEqual(c.until, t0.addingTimeInterval(2700), "the block in progress keeps its end")
+        XCTAssertEqual(c.nextBreakMinutes, 20)
+        // A plan too short for the place wraps instead of leaving the clock off its end.
+        c.use(LecturePlan("30 10"))
+        XCTAssertEqual(c.block, 1)
+        XCTAssertEqual(c.tick(now: t0.addingTimeInterval(2700)), .startBreak(minutes: 10))
+        XCTAssertEqual(c.resume(now: t0.addingTimeInterval(2800)), t0.addingTimeInterval(4600))
+        XCTAssertEqual(c.index, 0, "the new plan is one round long, so it starts again")
+        XCTAssertEqual(c.blockMinutes, 30)
+    }
+}

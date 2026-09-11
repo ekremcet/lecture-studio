@@ -109,6 +109,25 @@ enum Smoke {
                 note("after Break: break=\(pres.breakUntil != nil)")
                 await shot("screen-break.png")
                 pres.endBreak()
+                // The lecture clock: armed by hand, then stepped past the end of each block, so the breaks that
+                // follow are the clock's own doing and the smoke does not sit out a whole lecture.
+                let rhythm = pres.lecturePlan.text
+                note("clock: rhythm=\(rhythm) blocks=\(pres.countdown.blocks) auto=\(pres.autoBreak) hand-started break=\(pres.breakMinutes) min settings=(\(store.lecturePlan.text), \(store.lectureBreakMinutes) min, \(store.autoBreak))")
+                pres.startCountdown()
+                note("clock armed: running=\(pres.countdown.running) counting=\(pres.countdown.counting) block=\(pres.countdown.block)/\(pres.countdown.blocks) break=\(pres.breakUntil != nil)")
+                pres.countdownTick(now: Date().addingTimeInterval(TimeInterval(pres.countdown.blockMinutes * 60 + 1)))
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                note("first block over: break=\(pres.breakUntil != nil) index=\(pres.countdown.index) block=\(pres.countdown.block)/\(pres.countdown.blocks)")
+                await shot("screen-auto-break.png")
+                pres.endBreak()
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                note("after the clock's break: break=\(pres.breakUntil != nil) block=\(pres.countdown.block)/\(pres.countdown.blocks) next break=\(pres.countdown.nextBreakMinutes) min")
+                pres.countdownTick(now: Date().addingTimeInterval(3600))
+                note("last block over: break=\(pres.breakUntil != nil) index=\(pres.countdown.index)")
+                pres.endBreak()
+                note("rhythm wrapped: index=\(pres.countdown.index) counting=\(pres.countdown.counting)")
+                pres.stopCountdown()
+                note("timer stopped: running=\(pres.countdown.running) counting=\(pres.countdown.counting)")
                 pres.togglePresenterWindow()
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
                 let presenter = NSApp.windows.first { $0.title == "Presenter" }

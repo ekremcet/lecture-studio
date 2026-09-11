@@ -33,6 +33,20 @@ enum AppSettings {
         get { defaults.object(forKey: "showNotes") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "showNotes") }
     }
+    /// Presenter mode's system-wide defaults: the lecture rhythm (teaching and break minutes in order), the
+    /// break a hand-started Break lasts, and whether a block that runs out hands the room over by itself.
+    static var lecturePlan: String {
+        get { defaults.string(forKey: "lecturePlan") ?? LecturePlan.defaultText }
+        set { defaults.set(newValue, forKey: "lecturePlan") }
+    }
+    static var breakMinutes: Int {
+        get { defaults.object(forKey: "breakMinutes") as? Int ?? 10 }
+        set { defaults.set(newValue, forKey: "breakMinutes") }
+    }
+    static var autoBreak: Bool {
+        get { defaults.object(forKey: "autoBreak") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "autoBreak") }
+    }
     static var panelOrder: [String] {
         get { defaults.stringArray(forKey: "panelOrder") ?? [] }
         set { defaults.set(newValue, forKey: "panelOrder") }

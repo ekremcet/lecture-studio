@@ -6,6 +6,12 @@ import StudioCore
 /// window with the current slide, the next slide, the speaker notes, a clock and the slide counter. Arrow
 /// keys and space move; Escape ends.
 ///
+/// The lecturer sets the lecture clock (the rhythm menu and the Timer button): the teaching and break minutes
+/// of one round, in order — "20 / 5 · 20 / 15" is two blocks, the long break after the second — and whether a
+/// block that runs out hands the room over by itself. A break the clock called is the same break the Break
+/// button gives, and when it ends the clock arms the next block of the rhythm; after the last break the
+/// rhythm starts again. The system-wide defaults live in Settings › Teaching.
+///
 /// With one screen (a laptop alone, or mirrored to the projector) the slide window takes that screen at
 /// the normal window level, so the menu bar still drops down, ⌘Tab still brings another app on top and
 /// the Dock still comes up. A control strip appears over the slide when the pointer reaches the bottom
@@ -27,7 +33,26 @@ final class Presentation {
     private(set) var nextTitle = ""
     /// A break: the audience screen shows the course, the date and a countdown until this time.
     var breakUntil: Date?
-    var breakMinutes = 10
+    /// The lecture clock: this lecture's copy of the rhythm, and the break it hands over to on its own. It is
+    /// seeded from the system-wide defaults when the show opens, so a lecture can run a rhythm of its own
+    /// without changing what the next one starts with.
+    private(set) var countdown = LectureCountdown(
+        plan: LecturePlan(AppSettings.lecturePlan),
+        autoBreak: AppSettings.autoBreak
+    )
+    /// The break the manual Break button starts. Seeded from the system-wide default when the show opens; the
+    /// Break field changes it for this lecture.
+    var breakMinutes = AppSettings.breakMinutes
+    /// The rhythm this lecture runs.
+    var lecturePlan: LecturePlan {
+        get { countdown.plan }
+        set { countdown.use(newValue) }
+    }
+    /// Whether this lecture's blocks hand the room to their breaks by themselves.
+    var autoBreak: Bool {
+        get { countdown.autoBreak }
+        set { countdown.autoBreak = newValue }
+    }
     private(set) var courseTitle = ""
     private(set) var unitTitle = ""
     let show = PreviewController()
@@ -38,6 +63,7 @@ final class Presentation {
     private var keyMonitor: Any?
     private var pointerTimer: Timer?
     private var stripTimer: Timer?
+    private var countdownTimer: Timer?
     private weak var store: StudioStore?
     private var markdown = ""
     private var starts: [Int] = [0]
@@ -47,6 +73,12 @@ final class Presentation {
         courseTitle = Labels.courseLabel(store.course, store.meta)
         unitTitle = store.talk ? "" : Labels.unitLabel(store.unit ?? "")
         breakUntil = nil
+        // This lecture starts with its own clock, from the system-wide defaults: a rhythm picked in presenter
+        // mode lasts for this lecture, and Settings keeps what the next one starts with.
+        countdown.autoBreak = store.autoBreak
+        breakMinutes = store.lectureBreakMinutes
+        countdown.use(store.lecturePlan)
+        countdown.reset()
         markdown = store.previewText
         starts = store.starts
         count = store.slideCount
@@ -68,6 +100,11 @@ final class Presentation {
             default: return e
             }
         }
+        // The lecture clock. One tick a second is all it needs: the countdown is shown from dates, and the
+        // only thing a tick decides is whether the block has run out and the break takes over.
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.countdownTick() }
+        }
     }
 
     private func apply() {
@@ -78,12 +115,56 @@ final class Presentation {
         store?.goToSlide(index, from: "rail")
     }
 
+    /// Put a break up on the audience screen for this many minutes. The rhythm's own breaks use the plan's
+    /// minutes, a hand-started one the Break field; neither borrows the other's length.
     func startBreak(minutes: Int) {
-        breakMinutes = max(1, min(180, minutes))
-        breakUntil = Date().addingTimeInterval(TimeInterval(breakMinutes * 60))
+        breakUntil = Date().addingTimeInterval(TimeInterval(LecturePlan.clamp(minutes) * 60))
+        // A break has the room whether it was asked for or the clock called it: the block stops counting now,
+        // and a clock that is still on picks the lecture up when the break ends.
+        countdown.suspend()
     }
 
-    func endBreak() { breakUntil = nil }
+    func endBreak() {
+        guard breakUntil != nil else { return }
+        breakUntil = nil
+        countdown.resume()
+    }
+
+    /// Start the lecture clock, or stop it: the countdown to the break, and the break that follows it.
+    func toggleCountdown() {
+        guard presenting else { return }
+        if countdown.running { stopCountdown() } else { startCountdown() }
+    }
+
+    /// Arm the countdown for the minutes in the field. A running break has the room: the clock would only
+    /// count down to a break that is already up, so it waits for the lecturer to take this one first.
+    func startCountdown(now: Date = Date()) {
+        guard presenting, breakUntil == nil else { return }
+        countdown.start(now: now)
+    }
+
+    func stopCountdown() { countdown.stop() }
+
+    /// A tick of the lecture clock: with auto break on, a block that runs out puts the break up on the
+    /// audience screen by itself. `now` is a parameter so the smoke run can step the clock without waiting.
+    func countdownTick(now: Date = Date()) {
+        guard presenting else { return }
+        switch countdown.tick(now: now) {
+        case .none:
+            break
+        case .startBreak(let minutes):
+            startBreak(minutes: minutes)
+            store?.toasts.show(.info, "Break: \(minutes) min", "The audience screen is counting down; End break brings the slide back.")
+        case .timeIsUp:
+            store?.toasts.show(.info, "The block is over", "Auto break is off: take the break when you are ready.")
+        }
+    }
+
+    /// Start a break of `breakMinutes`, or end the running one: the Break button's action.
+    func toggleBreak() {
+        guard presenting else { return }
+        if breakUntil != nil { endBreak() } else { startBreak(minutes: breakMinutes) }
+    }
 
     /// Single screen: show the presenter window over the slide, or hide it again.
     func togglePresenterWindow() {
@@ -138,6 +219,7 @@ final class Presentation {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         pointerTimer?.invalidate(); pointerTimer = nil
         stripTimer?.invalidate(); stripTimer = nil
+        countdownTimer?.invalidate(); countdownTimer = nil
         stripUntil = nil; stripHovered = false; presenterShown = false
         NSCursor.setHiddenUntilMouseMoves(false)
         NSApp.presentationOptions = []
@@ -222,6 +304,7 @@ struct PresenterView: View {
                     TimelineView(.periodic(from: presentation.startedAt, by: 1)) { ctx in
                         Text(elapsed(ctx.date)).font(.title3.monospacedDigit()).foregroundStyle(.secondary)
                     }
+                    countdownControl
                     breakControl
                     Button("End", role: .destructive) { presentation.stop() }.keyboardShortcut(.escape, modifiers: [])
                 }
@@ -249,7 +332,7 @@ struct PresenterView: View {
                     .font(.system(size: 18))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("← → or space to move, Esc to end").font(.caption).foregroundStyle(.tertiary)
+                Text(hints).font(.caption).foregroundStyle(.tertiary)
             }
             .padding(16)
             .frame(width: 380)
@@ -257,7 +340,11 @@ struct PresenterView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    var hints: String { "← → or space to move, Esc to end" }
+
     var breakControl: some View { BreakControl(presentation: presentation) }
+
+    var countdownControl: some View { CountdownControl(presentation: presentation) }
 
     func elapsed(_ now: Date) -> String {
         let s = max(0, Int(now.timeIntervalSince(presentation.startedAt)))
@@ -281,14 +368,76 @@ struct BreakControl: View {
             Button("End break") { presentation.endBreak() }.fixedSize()
         } else {
             HStack(spacing: 4) {
-                TextField("min", text: $breakText).frame(width: 40).multilineTextAlignment(.trailing).onSubmit { startBreak() }
-                Button { startBreak() } label: { Label("Break", systemImage: "cup.and.saucer") }.fixedSize()
-                    .help("Show a countdown on the audience screen for this many minutes")
+                // Every keystroke lands: Return never reaches this field (it moves the slide), so the Break
+                // button must read what was typed without a commit.
+                TextField("min", text: $breakText).frame(width: 40).multilineTextAlignment(.trailing)
+                    .onAppear { breakText = String(presentation.breakMinutes) }
+                    .onChange(of: breakText) { _, v in if let n = Int(v.trimmed) { presentation.breakMinutes = max(1, min(180, n)) } }
+                Button { presentation.toggleBreak() } label: {
+                    Label("Break", systemImage: "cup.and.saucer")
+                }
+                .fixedSize()
+                .help("Show a countdown on the audience screen for this many minutes")
+            }
+        }
+    }
+}
+
+/// The lecture clock: the rhythm this lecture runs, the countdown once it is on, and the switch that lets a
+/// break take the slide by itself. Shared by the presenter window and the single-screen strip. While a break
+/// is up the clock steps back — the break's own countdown owns the slide — and arms the next block when it
+/// ends.
+struct CountdownControl: View {
+    let presentation: Presentation
+
+    var body: some View {
+        if presentation.breakUntil == nil {
+            if presentation.countdown.running {
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    Text(state(ctx.date))
+                        .font(.title3.monospacedDigit())
+                        .foregroundStyle(presentation.countdown.counting && presentation.autoBreak ? Color.orange : Color.secondary)
+                        .help(presentation.autoBreak ? "The break goes up on the audience screen by itself when this block runs out" : "Auto break is off: this counts the block down, and the break is yours to start")
+                }
+                Button("Stop timer") { presentation.stopCountdown() }.fixedSize()
+            } else {
+                rhythmMenu
+                Button { presentation.toggleCountdown() } label: {
+                    Label("Timer", systemImage: "timer")
+                }
+                .fixedSize()
+                .help("Walk this lecture's rhythm: count each block down and hand over to the break after it")
+                Toggle("Auto break", isOn: Binding(get: { presentation.autoBreak }, set: { presentation.autoBreak = $0 }))
+                    .toggleStyle(.checkbox)
+                    .fixedSize()
+                    .help("Take each break by itself, for the minutes the rhythm gives it")
             }
         }
     }
 
-    func startBreak() { presentation.startBreak(minutes: Int(breakText.trimmed) ?? 10) }
+    /// "Block 2 of 2 · Break in 12:34" while a block counts, and the same block left open when auto break is
+    /// off and the block has run out.
+    private func state(_ now: Date) -> String {
+        let c = presentation.countdown
+        guard let left = c.secondsLeft(now: now) else { return "Block \(c.block) of \(c.blocks) · your break" }
+        return "Block \(c.block) of \(c.blocks) · Break in \(String(format: "%d:%02d", left / 60, left % 60))"
+    }
+
+    /// The rhythm, and the others to switch to. A pick lasts for this lecture; the settings hold the default.
+    private var rhythmMenu: some View {
+        Menu {
+            ForEach(LecturePlan.presets) { p in
+                let plan = LecturePlan(p.text)
+                Button { presentation.lecturePlan = plan } label: {
+                    if plan == presentation.lecturePlan { Label(p.title, systemImage: "checkmark") } else { Text(p.title) }
+                }
+            }
+        } label: {
+            Text(presentation.lecturePlan.compact)
+        }
+        .fixedSize()
+        .help("The rhythm: teaching and break minutes in order, and it repeats. Pick another one for this lecture; Settings › Teaching holds the default.")
+    }
 }
 
 /// Single screen: the presenter's controls over the slide, shown while the mouse moves.
@@ -306,6 +455,7 @@ struct ControlStrip: View {
                 let s = max(0, Int(ctx.date.timeIntervalSince(presentation.startedAt)))
                 Text(String(format: "%02d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)).font(.title3.monospacedDigit()).foregroundStyle(.secondary)
             }
+            CountdownControl(presentation: presentation)
             BreakControl(presentation: presentation)
             Button { presentation.togglePresenterWindow() } label: { Label(presentation.presenterShown ? "Hide notes" : "Notes", systemImage: "text.alignleft") }.fixedSize()
                 .help("The presenter window: the next slide and your notes, over the slide")

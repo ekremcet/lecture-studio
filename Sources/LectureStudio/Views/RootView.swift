@@ -88,14 +88,72 @@ struct SettingsView: View {
     @State private var subject = AppSettings.subject
     @State private var status = ""
     @State private var testing = false
+    @State private var planText = AppSettings.lecturePlan
+    @State private var breakText = String(AppSettings.breakMinutes)
 
     var body: some View {
         TabView {
             Form { librarySection }.formStyle(.grouped).tabItem { Label("Library", systemImage: "folder") }
+            Form { teachingSection }.formStyle(.grouped).tabItem { Label("Teaching", systemImage: "timer") }
             Form { oberikSection }.formStyle(.grouped).tabItem { Label("Agent", systemImage: "sparkles") }
         }
-        .frame(width: 540, height: 400)
+        .frame(width: 540, height: 500)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+        .onAppear {
+            // The defaults live on the store, so a rhythm picked in presenter mode shows up here too.
+            planText = store.lecturePlan.text
+            breakText = String(store.lectureBreakMinutes)
+        }
+    }
+
+    /// The lecture clock's system-wide defaults: the rhythm every lecture starts with, and what a break the
+    /// lecturer starts by hand lasts.
+    @ViewBuilder var teachingSection: some View {
+        Section {
+            HStack {
+                TextField("20 5 20 15", text: $planText)
+                    .font(.system(.body, design: .monospaced))
+                    .labelsHidden()      // the section is the label; the string here is the empty field's format
+                    .onSubmit { applyPlan() }
+                Menu("Presets") {
+                    ForEach(LecturePlan.presets) { p in
+                        let plan = LecturePlan(p.text)
+                        Button("\(plan.compact) — \(plan.roundMinutes) min round") {
+                            planText = plan.text
+                            store.setLecturePlan(plan)
+                        }
+                    }
+                }
+                .fixedSize()
+                Button("Apply") { applyPlan() }.disabled(planText.trimmed == store.lecturePlan.text)
+            }
+            Text(LecturePlan(planText).summary).font(.caption).foregroundStyle(.secondary)
+        } header: {
+            Text("Lecture rhythm")
+        } footer: {
+            Text("Teaching and break minutes, in the order you teach them. Presenter mode counts each block down and, with auto break on, hands the room over to the break after it. One round is \(LecturePlan(planText).roundMinutes) minutes and then it starts again, so a three-hour slot keeps the rhythm. Presenter mode can run another rhythm for a single lecture without changing this.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section {
+            LabeledContent("Hand-started break") {
+                HStack(spacing: 4) {
+                    TextField("10", text: $breakText).frame(width: 56).multilineTextAlignment(.trailing)
+                        .onChange(of: breakText) { _, v in if let n = Int(v.trimmed) { store.setLectureBreakMinutes(n) } }
+                    Text("min")
+                }
+            }
+            Toggle("Auto break", isOn: Binding(get: { store.autoBreak }, set: { store.setAutoBreak($0) }))
+        } header: {
+            Text("Breaks")
+        } footer: {
+            Text("A break the rhythm calls lasts as long as the rhythm says; this is the length of one you start yourself with the Break button. With auto break off the block still counts down, and you decide when the break comes.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    func applyPlan() {
+        store.setLecturePlan(LecturePlan(planText))
+        planText = store.lecturePlan.text
     }
 
     @ViewBuilder var librarySection: some View {
