@@ -41,14 +41,21 @@ struct ChatView: View {
             if scopes.count > 1 {
                 Picker("", selection: $scopeKey) { ForEach(scopes) { Text($0.label).tag($0.key) } }.labelsHidden().controlSize(.small).fixedSize().help("Which conversation: this unit or the whole course")
             }
+            // The conversation's name is the one thing in this row that gives way: the buttons are held to a
+            // single line, so a narrow panel ellipsises the title ("New conv…") instead of folding "History"
+            // onto a second line and dropping it below the row's baseline.
             Text(conv.messages.isEmpty ? "New conversation" : conv.title).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-            Spacer()
-            Button { historyOpen.toggle() } label: { Label("History", systemImage: "clock.arrow.circlepath") }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button { historyOpen.toggle() } label: { Label("History", systemImage: "clock.arrow.circlepath").lineLimit(1) }
                 .controlSize(.small).buttonStyle(.plain)
+                .layoutPriority(1)
                 .disabled(conv.running)
                 .help(conv.running ? "Earlier conversations open once this reply has finished" : "Earlier conversations of this \(scopes.count > 1 && scope.key == scopes[0].key ? "unit" : "course")")
                 .popover(isPresented: $historyOpen, arrowEdge: .bottom) { ChatHistoryList(scope: scope, current: conv.id) { historyOpen = false } }
-            Button { store.resetConversation(scope.key) } label: { Label("New", systemImage: "plus.bubble") }.controlSize(.small).buttonStyle(.plain).help("Start a new conversation (this one stays in the history)")
+            Button { store.resetConversation(scope.key) } label: { Label("New", systemImage: "plus.bubble").lineLimit(1) }
+                .controlSize(.small).buttonStyle(.plain)
+                .layoutPriority(1)
+                .help("Start a new conversation (this one stays in the history)")
         }
         .padding(.horizontal, 8).frame(height: 32)
     }
