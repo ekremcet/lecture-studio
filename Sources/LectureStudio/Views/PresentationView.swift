@@ -36,17 +36,20 @@ final class Presentation {
     /// The lecture clock: this lecture's copy of the rhythm, and the break it hands over to on its own. It is
     /// seeded from the system-wide defaults when the show opens, so a lecture can run a rhythm of its own
     /// without changing what the next one starts with.
-    private(set) var countdown = LectureCountdown(
-        plan: LecturePlan(AppSettings.lecturePlan),
-        autoBreak: AppSettings.autoBreak
-    )
+    private(set) var countdown = LectureCountdown(autoBreak: AppSettings.autoBreak)
     /// The break the manual Break button starts. Seeded from the system-wide default when the show opens; the
     /// Break field changes it for this lecture.
     var breakMinutes = AppSettings.breakMinutes
+    /// The formats the lecturer can switch to, as Settings had them when the show opened, and the one this
+    /// lecture runs.
+    private(set) var formats: [LectureFormat] = []
+    private(set) var format = LectureFormat.builtIn[0]
     /// The rhythm this lecture runs.
-    var lecturePlan: LecturePlan {
-        get { countdown.plan }
-        set { countdown.use(newValue) }
+    var lecturePlan: LecturePlan { countdown.plan }
+    /// Run this format for the rest of the lecture: the clock keeps its place, Settings keeps its default.
+    func use(_ f: LectureFormat) {
+        format = f
+        countdown.use(f.plan)
     }
     /// Whether this lecture's blocks hand the room to their breaks by themselves.
     var autoBreak: Bool {
@@ -77,7 +80,8 @@ final class Presentation {
         // mode lasts for this lecture, and Settings keeps what the next one starts with.
         countdown.autoBreak = store.autoBreak
         breakMinutes = store.lectureBreakMinutes
-        countdown.use(store.lecturePlan)
+        formats = store.lectureFormats
+        use(store.lectureFormat)
         countdown.reset()
         markdown = store.previewText
         starts = store.starts
@@ -423,21 +427,38 @@ struct CountdownControl: View {
         return "Block \(c.block) of \(c.blocks) · Break in \(String(format: "%d:%02d", left / 60, left % 60))"
     }
 
-    /// The rhythm, and the others to switch to. A pick lasts for this lecture; the settings hold the default.
+    /// The format this lecture runs, by name, and the others to switch to. A pick lasts for this lecture;
+    /// Settings › Teaching holds the default and the list.
     private var rhythmMenu: some View {
         Menu {
-            ForEach(LecturePlan.presets) { p in
-                let plan = LecturePlan(p.text)
-                Button { presentation.lecturePlan = plan } label: {
-                    if plan == presentation.lecturePlan { Label(p.title, systemImage: "checkmark") } else { Text(p.title) }
+            ForEach(presentation.formats) { f in
+                Toggle(isOn: Binding(get: { f.id == presentation.format.id }, set: { _ in presentation.use(f) })) {
+                    FormatLabel(format: f)
                 }
             }
         } label: {
-            Text(presentation.lecturePlan.compact)
+            FormatLabel(format: presentation.format).lineLimit(1)
         }
         .fixedSize()
-        .help("The rhythm: teaching and break minutes in order, and it repeats. Pick another one for this lecture; Settings › Teaching holds the default.")
+        .help("\(presentation.format.name): \(presentation.lecturePlan.compact), teaching and break minutes in order, and it repeats. Pick another format for this lecture; Settings › Teaching holds the list and the default.")
     }
+}
+
+/// A format as the presenter names it: its symbol and its name. (A menu item shows no second line on
+/// macOS, so the rhythm itself stays in the label's tooltip.)
+struct FormatLabel: View {
+    let format: LectureFormat
+
+    var body: some View {
+        if format.icon.isEmpty {
+            Text(name)
+        } else {
+            Label(name, systemImage: format.icon)
+        }
+    }
+
+    /// A format whose name was cleared still has to be told apart: its rhythm stands in.
+    private var name: String { format.name.isEmpty ? format.plan.compact : format.name }
 }
 
 /// Single screen: the presenter's controls over the slide, shown while the mouse moves.

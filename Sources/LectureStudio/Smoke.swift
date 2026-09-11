@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import SwiftUI
 import StudioCore
+import WebKit
 
 /// Development aid: `STUDIO_SMOKE=/dir` walks the screens against the open repo without clicking,
 /// and writes what it saw. `STUDIO_SMOKE_CHAT=1` adds one read-only agent turn (`STUDIO_SMOKE_PROMPT` replaces
@@ -86,6 +87,9 @@ enum Smoke {
             store.presentation.next()
             try? await Task.sleep(nanoseconds: Int(ProcessInfo.processInfo.environment["STUDIO_SMOKE_PRESENT_WAIT"] ?? "") .map { UInt64($0) * 1_000_000_000 } ?? 1_500_000_000)
             note("presenting=\(store.presentation.presenting) index=\(store.presentation.index) count=\(store.presentation.count) notes=\(store.presentation.notes.count) singleScreen=\(store.presentation.singleScreen) key=\(NSApp.keyWindow?.title ?? "-") windows=\(NSApp.windows.filter { $0.isVisible }.map { $0.title })")
+            await quitCheck("present", window: NSApp.windows.first { $0 is ShowWindow }, webView: store.presentation.show.webView, note: note)
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_QUIT"] == "field" { store.presentation.pointer(at: NSPoint(x: 0, y: 0)); try? await Task.sleep(nanoseconds: 400_000_000) }
+            await quitCheck("field", window: NSApp.windows.first { $0 is ShowWindow }, webView: store.presentation.show.webView, note: note)
             let showDir = out.appendingPathComponent("present")
             try? FileManager.default.createDirectory(at: showDir, withIntermediateDirectories: true)
             // `STUDIO_SMOKE_PRESENT=1` drives the single-screen strip from inside: the events go through
@@ -112,7 +116,7 @@ enum Smoke {
                 // The lecture clock: armed by hand, then stepped past the end of each block, so the breaks that
                 // follow are the clock's own doing and the smoke does not sit out a whole lecture.
                 let rhythm = pres.lecturePlan.text
-                note("clock: rhythm=\(rhythm) blocks=\(pres.countdown.blocks) auto=\(pres.autoBreak) hand-started break=\(pres.breakMinutes) min settings=(\(store.lecturePlan.text), \(store.lectureBreakMinutes) min, \(store.autoBreak))")
+                note("clock: format=\(pres.format.name) [\(pres.format.icon)] of \(pres.formats.map(\.name)) rhythm=\(rhythm) blocks=\(pres.countdown.blocks) auto=\(pres.autoBreak) hand-started break=\(pres.breakMinutes) min settings=(\(store.lecturePlan.text), \(store.lectureBreakMinutes) min, \(store.autoBreak))")
                 pres.startCountdown()
                 note("clock armed: running=\(pres.countdown.running) counting=\(pres.countdown.counting) block=\(pres.countdown.block)/\(pres.countdown.blocks) break=\(pres.breakUntil != nil)")
                 pres.countdownTick(now: Date().addingTimeInterval(TimeInterval(pres.countdown.blockMinutes * 60 + 1)))
@@ -145,6 +149,7 @@ enum Smoke {
             }
             store.presentation.stop()
             note("after stop presenting=\(store.presentation.presenting) windows=\(NSApp.windows.filter { $0.isVisible }.count)")
+            await quitCheck("editor", window: NSApp.windows.first { $0.isVisible && $0.canBecomeMain }, webView: store.editor.webView, note: note)
             if let git = store.repo.map({ GitClient(root: $0.root) }), let st = try? await git.status(fetchFirst: false) {
                 note("git: branch=\(st.branch) upstream=\(st.upstream ?? "-") ahead=\(st.ahead) behind=\(st.behind) changes=\(st.changes.count) last=\(st.lastCommit?.hash ?? "-")")
             }
@@ -280,6 +285,44 @@ enum Smoke {
     }
 
     /// CPU time this process has used, user and system.
+    /// `STUDIO_SMOKE_QUIT=present|editor`: ⌘Q into the app's own event loop with a web view as first responder,
+    /// the way it failed when WebKit kept the key. A quit ends the process, so the shell sees the pass; the
+    /// line written a second later is the failure.
+    static func quitCheck(_ place: String, window: NSWindow?, webView: NSView, note: (String) -> Void) async {
+        guard ProcessInfo.processInfo.environment["STUDIO_SMOKE_QUIT"] == place, let w = window else { return }
+        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        w.makeKeyAndOrderFront(nil)
+        var took = w.makeFirstResponder(webView)
+        // The editor as it is typed in: the page's own editable element focused, so the web process is the one
+        // handling the key. The strip's Break field is the other place a lecturer's ⌘Q lands.
+        if place == "editor", let wv = webView as? WKWebView {
+            _ = try? await wv.evaluateJavaScript("(() => { const c = document.querySelector('.cm-content'); if (c) c.focus(); return document.activeElement && document.activeElement.className; })()")
+        }
+        if place == "field", let field = firstTextField(in: w.contentView) { took = w.makeFirstResponder(field) }
+        note("⌘Q (\(place)): key=\(NSApp.keyWindow === w) firstResponder=\(w.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") (web view took it: \(took)) sending")
+        // `STUDIO_SMOKE_QUIT_WAIT=<s>` holds here for a ⌘Q posted from outside (CGEvent to this pid), which
+        // takes WebKit's real path; without it the key is made up in-process.
+        if let wait = Double(ProcessInfo.processInfo.environment["STUDIO_SMOKE_QUIT_WAIT"] ?? "") {
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        } else {
+            for down in [true, false] {
+                guard let e = NSEvent.keyEvent(with: down ? .keyDown : .keyUp, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: w.windowNumber, context: nil, characters: "q", charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12) else { continue }
+                NSApp.sendEvent(e)
+            }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+        note("⌘Q (\(place)): ignored, still running")
+    }
+
+    static func firstTextField(in v: NSView?) -> NSTextField? {
+        guard let v else { return nil }
+        if let f = v as? NSTextField, f.isEditable { return f }
+        for sub in v.subviews { if let f = firstTextField(in: sub) { return f } }
+        return nil
+    }
+
     static func cpuSeconds() -> Double {
         var ru = rusage()
         getrusage(RUSAGE_SELF, &ru)

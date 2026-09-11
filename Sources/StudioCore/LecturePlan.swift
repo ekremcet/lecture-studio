@@ -42,20 +42,68 @@ public struct LecturePlan: Equatable, Sendable {
 
     /// Teaching blocks in one round: what "block 2 of 2" counts.
     public var blocks: Int { lengths.count / 2 }
+}
 
-    /// A named rhythm the lecturer can pick, in the settings pane and in presenter mode.
-    public struct Preset: Identifiable, Sendable {
-        public let title: String
-        public let text: String
-        public var id: String { text }
+/// A lecture format: a rhythm with the name the lecturer knows it by — "Pomodoro" — and a symbol for the
+/// presenter's strip. The lecturer keeps the list in Settings › Teaching and picks one by name in presenter
+/// mode; the rhythm text itself is only typed when a format is made or changed.
+public struct LectureFormat: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    /// An SF Symbol name, or "" for a format that goes by its name alone.
+    public var icon: String
+    /// The rhythm as typed: "20 5 20 15". `plan` reads it; a half-typed field is kept as it is.
+    public var rhythm: String
+
+    public init(id: UUID = UUID(), name: String, icon: String = "", rhythm: String) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.rhythm = rhythm
     }
 
-    /// The rhythms a lecture here actually runs, the app's own default first.
-    public static let presets: [Preset] = [
-        Preset(title: "20 / 5 · 20 / 15", text: defaultText),
-        Preset(title: "25 / 5 ×4, then 15", text: "25 5 25 5 25 5 25 15"),
-        Preset(title: "45 / 15 · 45 / 15", text: "45 15 45 15"),
-        Preset(title: "50 / 10", text: "50 10"),
-        Preset(title: "90 / 15", text: "90 15"),
+    public var plan: LecturePlan { LecturePlan(rhythm) }
+
+    /// A name fits the strip: one line, and short enough that the rest of the controls keep their room.
+    public static let nameLimit = 24
+    public static func trimName(_ s: String) -> String { String(s.trimmingCharacters(in: .whitespacesAndNewlines).prefix(nameLimit)) }
+
+    /// The formats a new install starts with, the app's own default first.
+    public static let builtIn: [LectureFormat] = [
+        LectureFormat(name: "Pomodoro", icon: "hourglass", rhythm: LecturePlan.defaultText),
+        LectureFormat(name: "Short sprints", icon: "bolt", rhythm: "25 5 25 5 25 5 25 15"),
+        LectureFormat(name: "Two halves", icon: "square.split.2x1", rhythm: "45 15 45 15"),
+        LectureFormat(name: "One sitting", icon: "book", rhythm: "50 10"),
+        LectureFormat(name: "Seminar", icon: "person.2", rhythm: "90 15"),
     ]
+
+    /// The symbols a format can carry, with the word the picker shows for each.
+    public static let icons: [(symbol: String, name: String)] = [
+        ("hourglass", "Hourglass"), ("timer", "Timer"), ("clock", "Clock"), ("bolt", "Bolt"), ("hare", "Hare"), ("tortoise", "Tortoise"),
+        ("book", "Book"), ("graduationcap", "Graduation cap"), ("person.2", "Two people"), ("person.3", "Group"),
+        ("bubble.left.and.bubble.right", "Discussion"), ("laptopcomputer", "Laptop"), ("hammer", "Hammer"),
+        ("flask", "Flask"), ("lightbulb", "Lightbulb"), ("pencil", "Pencil"), ("square.split.2x1", "Two halves"),
+        ("cup.and.saucer", "Cup"), ("figure.walk", "Walk"), ("sun.max", "Sun"), ("moon", "Moon"), ("star", "Star"),
+        ("flag", "Flag"), ("leaf", "Leaf"), ("flame", "Flame"),
+    ]
+
+    /// The list as it is kept, resolved: what was saved, or — on the first run of this version — the built-in
+    /// list with the rhythm the old single "lecturePlan" setting held, so an upgrade keeps the lecturer's
+    /// rhythm and its choice. Returns the list and the id of the default format, always one of the list.
+    public static func resolve(saved: [LectureFormat]?, defaultId: UUID?, legacyRhythm: String?) -> (formats: [LectureFormat], defaultId: UUID) {
+        var list = saved ?? builtIn
+        if list.isEmpty { list = builtIn }
+        if saved == nil, let legacy = legacyRhythm.map({ LecturePlan($0).text }), !list.contains(where: { $0.plan.text == legacy }) {
+            list.append(LectureFormat(name: "My rhythm", icon: "", rhythm: legacy))
+        }
+        let chosen: UUID
+        if let id = defaultId, list.contains(where: { $0.id == id }) {
+            chosen = id
+        } else if saved == nil, let legacy = legacyRhythm.map({ LecturePlan($0).text }), let hit = list.first(where: { $0.plan.text == legacy }) {
+            chosen = hit.id
+        } else {
+            chosen = list[0].id
+        }
+        return (list, chosen)
+    }
 }

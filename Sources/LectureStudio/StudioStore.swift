@@ -79,9 +79,13 @@ final class StudioStore {
     var previewError: String?
     var current = 0
     var showNotes = AppSettings.showNotes
-    /// Presenter mode's defaults, system wide: the rhythm every lecture starts with, the break a
-    /// hand-started Break lasts, and whether a block that runs out hands the room over by itself.
-    var lecturePlan = LecturePlan(AppSettings.lecturePlan)
+    /// Presenter mode's defaults, system wide: the lecture formats and the one every lecture starts with,
+    /// the break a hand-started Break lasts, and whether a block that runs out hands the room over by itself.
+    var lectureFormats: [LectureFormat]
+    var lectureFormatId: UUID
+    /// The format every lecture starts with, and its rhythm.
+    var lectureFormat: LectureFormat { lectureFormats.first { $0.id == lectureFormatId } ?? lectureFormats[0] }
+    var lecturePlan: LecturePlan { lectureFormat.plan }
     var lectureBreakMinutes = AppSettings.breakMinutes
     var autoBreak = AppSettings.autoBreak
     var hiddenPanels: Set<PanelId> = Set(AppSettings.hiddenPanels.compactMap(PanelId.init(rawValue:)))
@@ -110,6 +114,11 @@ final class StudioStore {
     private var renderTask: Task<Void, Never>?
 
     init() {
+        // The formats list, seeded on the first run of this version from the single rhythm older versions kept.
+        let formats = LectureFormat.resolve(saved: AppSettings.lectureFormats, defaultId: AppSettings.lectureFormatId, legacyRhythm: AppSettings.legacyLecturePlan)
+        lectureFormats = formats.formats
+        lectureFormatId = formats.defaultId
+        if AppSettings.lectureFormats == nil { AppSettings.lectureFormats = formats.formats; AppSettings.lectureFormatId = formats.defaultId }
         WebHost.schemeHandler.repo = { [weak self] in self?.repo }
         preview.onVisible = { [weak self] i in self?.onVisibleSlide(i) }
         preview.onRendered = { [weak self] n, s in
@@ -535,11 +544,23 @@ final class StudioStore {
 
     // MARK: the lecture clock's defaults
 
-    /// The rhythm every lecture starts with: teaching and break minutes in order. Presenter mode can run
-    /// another one for a single lecture without coming back here.
-    func setLecturePlan(_ p: LecturePlan) {
-        lecturePlan = p
-        AppSettings.lecturePlan = p.text
+    /// The lecture formats, as Settings › Teaching edits them. Names are trimmed to what the strip can show;
+    /// an emptied list gets the built-in one back, and the default follows a format that was removed.
+    func setLectureFormats(_ list: [LectureFormat]) {
+        var list = list.map { f in var f = f; f.name = LectureFormat.trimName(f.name); return f }
+        if list.isEmpty { list = LectureFormat.builtIn }
+        lectureFormats = list
+        if !list.contains(where: { $0.id == lectureFormatId }) { lectureFormatId = list[0].id }
+        AppSettings.lectureFormats = list
+        AppSettings.lectureFormatId = lectureFormatId
+    }
+
+    /// The format every lecture starts with. Presenter mode can run another one for a single lecture
+    /// without coming back here.
+    func setLectureFormat(_ id: UUID) {
+        guard lectureFormats.contains(where: { $0.id == id }) else { return }
+        lectureFormatId = id
+        AppSettings.lectureFormatId = id
     }
 
     /// How long a break the lecturer starts by hand lasts.

@@ -15,7 +15,7 @@ final class EditorController: NSObject {
 
     override init() {
         let cfg = WebHost.configuration(bridge: bridge, replies: [], messages: ["studio"])
-        webView = WKWebView(frame: .zero, configuration: cfg)
+        webView = StudioWebView(frame: .zero, configuration: cfg)
         super.init()
         webView.setValue(false, forKey: "drawsBackground")
         bridge.onMessage = { [weak self] _, body in

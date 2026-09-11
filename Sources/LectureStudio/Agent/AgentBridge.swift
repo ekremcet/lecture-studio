@@ -40,7 +40,7 @@ final class AgentBridge: NSObject {
 
     override init() {
         let cfg = WebHost.configuration(bridge: bridge, replies: ["token", "tool"], messages: ["studio"])
-        webView = WKWebView(frame: .zero, configuration: cfg)
+        webView = StudioWebView(frame: .zero, configuration: cfg)
         super.init()
         bridge.onMessage = { [weak self] _, body in
             guard let self, let d = body as? [String: Any], let type = d["type"] as? String else { return }

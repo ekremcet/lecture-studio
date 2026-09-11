@@ -88,7 +88,7 @@ struct SettingsView: View {
     @State private var subject = AppSettings.subject
     @State private var status = ""
     @State private var testing = false
-    @State private var planText = AppSettings.lecturePlan
+    @State private var formats: [LectureFormat] = []
     @State private var breakText = String(AppSettings.breakMinutes)
 
     var body: some View {
@@ -100,38 +100,33 @@ struct SettingsView: View {
         .frame(width: 540, height: 500)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .onAppear {
-            // The defaults live on the store, so a rhythm picked in presenter mode shows up here too.
-            planText = store.lecturePlan.text
+            // The defaults live on the store; the pane edits a copy and hands every change back.
+            formats = store.lectureFormats
             breakText = String(store.lectureBreakMinutes)
         }
     }
 
-    /// The lecture clock's system-wide defaults: the rhythm every lecture starts with, and what a break the
-    /// lecturer starts by hand lasts.
+    /// The lecture clock's system-wide defaults: the formats, the one every lecture starts with, and what a
+    /// break of the lecturer's own lasts.
     @ViewBuilder var teachingSection: some View {
         Section {
-            HStack {
-                TextField("20 5 20 15", text: $planText)
-                    .font(.system(.body, design: .monospaced))
-                    .labelsHidden()      // the section is the label; the string here is the empty field's format
-                    .onSubmit { applyPlan() }
-                Menu("Presets") {
-                    ForEach(LecturePlan.presets) { p in
-                        let plan = LecturePlan(p.text)
-                        Button("\(plan.compact) — \(plan.roundMinutes) min round") {
-                            planText = plan.text
-                            store.setLecturePlan(plan)
-                        }
-                    }
+            VStack(spacing: 0) {
+                ForEach($formats) { $f in
+                    FormatRow(format: $f, canRemove: formats.count > 1) { formats.removeAll { $0.id == f.id } }
+                    if f.id != formats.last?.id { Divider().padding(.leading, 44) }
                 }
-                .fixedSize()
-                Button("Apply") { applyPlan() }.disabled(planText.trimmed == store.lecturePlan.text)
             }
-            Text(LecturePlan(planText).summary).font(.caption).foregroundStyle(.secondary)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+            .onChange(of: formats) { _, list in store.setLectureFormats(list) }
+            Button { formats.append(LectureFormat(name: "New format", icon: "", rhythm: LecturePlan.defaultText)) } label: { Label("Add format", systemImage: "plus") }
+            Picker("Start lectures with", selection: Binding(get: { store.lectureFormatId }, set: { store.setLectureFormat($0) })) {
+                ForEach(store.lectureFormats) { f in FormatLabel(format: f).tag(f.id) }
+            }
         } header: {
-            Text("Lecture rhythm")
+            Text("Lecture formats")
         } footer: {
-            Text("Teaching and break minutes, in the order you teach them. Presenter mode counts each block down and, with auto break on, hands the room over to the break after it. One round is \(LecturePlan(planText).roundMinutes) minutes and then it starts again, so a three-hour slot keeps the rhythm. Presenter mode can run another rhythm for a single lecture without changing this.")
+            Text("A format is a name, a symbol and its rhythm: teaching and break minutes in the order you teach them. Presenter mode counts each block down and, with auto break on, hands the room over to the break after it; after the last break the rhythm starts again, so a three-hour slot keeps it. The presenter's strip names the format and can switch to another one for a single lecture without changing the default.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         Section {
@@ -149,11 +144,6 @@ struct SettingsView: View {
             Text("A break the rhythm calls lasts as long as the rhythm says; this is the length of one you start yourself with the Break button. With auto break off the block still counts down, and you decide when the break comes.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-    }
-
-    func applyPlan() {
-        store.setLecturePlan(LecturePlan(planText))
-        planText = store.lecturePlan.text
     }
 
     @ViewBuilder var librarySection: some View {
@@ -242,5 +232,50 @@ struct SettingsView: View {
             } catch { status = "Failed: \(error.localizedDescription)" }
             testing = false
         }
+    }
+}
+
+/// One lecture format in Settings › Teaching: its symbol, its name, its rhythm and, under the name, how the
+/// rhythm reads.
+struct FormatRow: View {
+    @Binding var format: LectureFormat
+    let canRemove: Bool
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Menu {
+                Button { format.icon = "" } label: { Label("None", systemImage: "circle.dashed") }
+                Divider()
+                ForEach(LectureFormat.icons, id: \.symbol) { i in
+                    Button { format.icon = i.symbol } label: { Label(i.name, systemImage: i.symbol) }
+                }
+            } label: {
+                Image(systemName: format.icon.isEmpty ? "circle.dashed" : format.icon)
+                    .foregroundStyle(format.icon.isEmpty ? .tertiary : .primary)
+                    .frame(width: 18)
+            }
+            .menuIndicator(.hidden)
+            .frame(width: 44)
+            .help("The symbol the presenter's strip shows next to the name")
+            VStack(alignment: .leading, spacing: 3) {
+                TextField("Name", text: Binding(get: { format.name }, set: { format.name = String($0.prefix(LectureFormat.nameLimit)) }))
+                    .textFieldStyle(.plain)
+                    .labelsHidden()
+                    .font(.body.weight(.medium))
+                Text("\(format.plan.compact) · \(format.plan.roundMinutes) min round")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+            TextField("20 5 20 15", text: $format.rhythm)
+                .labelsHidden()
+                .font(.system(.body, design: .monospaced))
+                .frame(width: 184)
+                .help("Teaching and break minutes, in the order you teach them: 20 5 20 15 is twenty on, five off, twenty on, fifteen off")
+            Button(action: remove) { Image(systemName: "minus.circle") }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .disabled(!canRemove)
+                .help(canRemove ? "Remove this format" : "The last format stays")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
     }
 }

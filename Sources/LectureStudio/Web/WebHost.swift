@@ -97,6 +97,26 @@ enum WebHost {
     }
 }
 
+/// The app's web views. When a web view is first responder, WebKit reports every ⌘-key as handled by
+/// the page, so the menu bar never sees ⌘Q, ⌘H, ⌘, or ⌘S: the app cannot be quit from the editor.
+/// Offer ⌘-keys to the menu bar first. The Edit menu stays with the page, so CodeMirror keeps its
+/// own undo, copy, paste and select-all.
+final class StudioWebView: WKWebView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command), window?.firstResponder === self, let items = NSApp.mainMenu?.items {
+            for item in items {
+                guard let menu = item.submenu, !Self.isEditMenu(menu) else { continue }
+                if menu.performKeyEquivalent(with: event) { return true }
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private static func isEditMenu(_ menu: NSMenu) -> Bool {
+        menu.items.contains { $0.action == Selector(("undo:")) || $0.action == Selector(("copy:")) }
+    }
+}
+
 /// Decode a JSON-like value from the bridge into a Codable.
 func decodeBridge<T: Decodable>(_ type: T.Type, _ value: Any?) -> T? {
     guard let value, JSONSerialization.isValidJSONObject(value), let d = try? JSONSerialization.data(withJSONObject: value) else { return nil }

@@ -33,12 +33,19 @@ enum AppSettings {
         get { defaults.object(forKey: "showNotes") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "showNotes") }
     }
-    /// Presenter mode's system-wide defaults: the lecture rhythm (teaching and break minutes in order), the
-    /// break a hand-started Break lasts, and whether a block that runs out hands the room over by itself.
-    static var lecturePlan: String {
-        get { defaults.string(forKey: "lecturePlan") ?? LecturePlan.defaultText }
-        set { defaults.set(newValue, forKey: "lecturePlan") }
+    /// Presenter mode's system-wide defaults: the lecture formats (a name, a symbol and the teaching and
+    /// break minutes in order) and the one every lecture starts with, the break a hand-started Break lasts,
+    /// and whether a block that runs out hands the room over by itself.
+    static var lectureFormats: [LectureFormat]? {
+        get { defaults.data(forKey: "lectureFormats").flatMap { try? JSONDecoder().decode([LectureFormat].self, from: $0) } }
+        set { defaults.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "lectureFormats") }
     }
+    static var lectureFormatId: UUID? {
+        get { defaults.string(forKey: "lectureFormat").flatMap(UUID.init(uuidString:)) }
+        set { defaults.set(newValue?.uuidString, forKey: "lectureFormat") }
+    }
+    /// The single rhythm of versions before the formats list; read once to seed it.
+    static var legacyLecturePlan: String? { defaults.string(forKey: "lecturePlan") }
     static var breakMinutes: Int {
         get { defaults.object(forKey: "breakMinutes") as? Int ?? 10 }
         set { defaults.set(newValue, forKey: "breakMinutes") }

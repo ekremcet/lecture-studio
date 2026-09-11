@@ -416,11 +416,12 @@ final class LecturePlanTests: XCTestCase {
     }
 
     func testTextRoundTrips() {
-        for p in LecturePlan.presets {
-            XCTAssertEqual(LecturePlan(p.text).text, p.text, p.title)
+        for f in LectureFormat.builtIn {
+            XCTAssertEqual(f.plan.text, f.rhythm, f.name)
+            XCTAssertFalse(f.icon.isEmpty, "\(f.name) ships with a symbol")
         }
-        XCTAssertEqual(Set(LecturePlan.presets.map(\.text)).count, LecturePlan.presets.count, "presets are distinct")
-        XCTAssertEqual(LecturePlan.presets.first?.text, LecturePlan.defaultText, "the app's own rhythm comes first")
+        XCTAssertEqual(Set(LectureFormat.builtIn.map(\.rhythm)).count, LectureFormat.builtIn.count, "built-in formats are distinct")
+        XCTAssertEqual(LectureFormat.builtIn.first?.rhythm, LecturePlan.defaultText, "the app's own rhythm comes first")
         XCTAssertEqual(LecturePlan.clamp(0), 1)
         XCTAssertEqual(LecturePlan.clamp(999), 180)
     }
@@ -545,5 +546,41 @@ final class LectureCountdownTests: XCTestCase {
         XCTAssertEqual(c.resume(now: t0.addingTimeInterval(2800)), t0.addingTimeInterval(4600))
         XCTAssertEqual(c.index, 0, "the new plan is one round long, so it starts again")
         XCTAssertEqual(c.blockMinutes, 30)
+    }
+}
+
+final class LectureFormatTests: XCTestCase {
+    func testFirstRunKeepsTheOldRhythm() {
+        // Nothing saved yet and the old single rhythm was a built-in one: that format is the default.
+        let kept = LectureFormat.resolve(saved: nil, defaultId: nil, legacyRhythm: "45 15 45 15")
+        XCTAssertEqual(kept.formats.map(\.name), LectureFormat.builtIn.map(\.name))
+        XCTAssertEqual(kept.formats.first { $0.id == kept.defaultId }?.rhythm, "45 15 45 15")
+        // A rhythm of the lecturer's own lands as a format of its own, and stays the default.
+        let own = LectureFormat.resolve(saved: nil, defaultId: nil, legacyRhythm: "30 10 30 10 30 20")
+        XCTAssertEqual(own.formats.count, LectureFormat.builtIn.count + 1)
+        XCTAssertEqual(own.formats.last?.name, "My rhythm")
+        XCTAssertEqual(own.formats.last?.id, own.defaultId)
+        // No old setting at all: the built-in list, its first format the default.
+        let fresh = LectureFormat.resolve(saved: nil, defaultId: nil, legacyRhythm: nil)
+        XCTAssertEqual(fresh.defaultId, fresh.formats[0].id)
+        XCTAssertEqual(fresh.formats[0].name, "Pomodoro")
+    }
+
+    func testSavedListWins() {
+        let mine = [LectureFormat(name: "Lab", icon: "flask", rhythm: "60 10"), LectureFormat(name: "Talk", rhythm: "40 5")]
+        let r = LectureFormat.resolve(saved: mine, defaultId: mine[1].id, legacyRhythm: "20 5 20 15")
+        XCTAssertEqual(r.formats, mine, "the old rhythm is not added again once a list is saved")
+        XCTAssertEqual(r.defaultId, mine[1].id)
+        // A default that was removed falls back to the first format; an emptied list to the built-in one.
+        XCTAssertEqual(LectureFormat.resolve(saved: mine, defaultId: UUID(), legacyRhythm: nil).defaultId, mine[0].id)
+        XCTAssertEqual(LectureFormat.resolve(saved: [], defaultId: nil, legacyRhythm: nil).formats.count, LectureFormat.builtIn.count)
+    }
+
+    func testCodableAndNames() throws {
+        let f = LectureFormat(name: "Pomodoro", icon: "timer", rhythm: "20 5 20 15")
+        let back = try JSONDecoder().decode(LectureFormat.self, from: JSONEncoder().encode(f))
+        XCTAssertEqual(back, f)
+        XCTAssertEqual(LectureFormat.trimName("  A very long name for a lecture format indeed  ").count, LectureFormat.nameLimit)
+        XCTAssertEqual(LectureFormat(name: "x", rhythm: "20 5 20").plan.text, "20 5 20 5", "a half-typed rhythm still reads as a plan")
     }
 }
