@@ -20,12 +20,13 @@ struct MarpHelpSheet: View {
         Row(what: "Columns and HTML", how: "HTML is enabled: <div class=\"two-columns\"><div class=\"column\">…</div></div> gives two columns with the house style; small inline styles work too."),
         Row(what: "Math", how: "$…$ and $$…$$ when the front matter has math: mathjax."),
         Row(what: "Themes", how: "The app ships the ytu-lecture and ytu-talk themes (a lecture and a talk style); the default Marp theme is used when a deck names none. A style: | block in the front matter overrides sizes, colours and spacing."),
+        Row(what: "Export", how: "Export in the toolbar (or File › Export…) writes a PDF or a PowerPoint (next to the deck unless you choose elsewhere) with marp-cli, the same renderer as the preview. It needs marp-cli and a browser (Chrome, Edge, Chromium or Firefox) on this Mac; the sheet says what it found."),
         Row(what: "Checks", how: "\"Check slides\" renders every slide and flags text that runs past the slide edge or images that fail to load; the same check is available to the assistant as qa_deck."),
     ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DialogHeader(title: "How decks work", icon: "rectangle.on.rectangle", description: "Lecture Studio decks are Marp Markdown. The editor is a text editor with helpers; the preview is what Marp renders; export to PDF or PowerPoint uses the Marp toolchain.")
+            DialogHeader(title: "How decks work", icon: "rectangle.on.rectangle", description: "Lecture Studio decks are Marp Markdown. The editor is a text editor with helpers; the preview is what Marp renders; Export (⇧⌘E) hands the file to marp-cli for a PDF or a PowerPoint.")
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     section("The file", basics)

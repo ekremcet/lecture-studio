@@ -125,9 +125,10 @@ struct BusyLabel: View {
     var busy: Bool
     var idle: String
     var working: String
+    var icon: String? = nil
     var body: some View {
         HStack(spacing: 6) {
-            if busy { ProgressView().controlSize(.small) }
+            if busy { ProgressView().controlSize(.small) } else if let icon { Image(systemName: icon) }
             Text(busy ? working : idle)
         }
     }

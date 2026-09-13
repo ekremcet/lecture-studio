@@ -25,6 +25,10 @@ struct LectureStudioApp: App {
                 Button("Save") { Task { await store.save() } }
                     .keyboardShortcut(store.shortcut(for: .save)?.keyboardShortcut)
                     .disabled(!store.dirty)
+                Divider()
+                Button("Export…") { store.exportDeck() }
+                    .keyboardShortcut(store.shortcut(for: .exportDeck)?.keyboardShortcut)
+                    .disabled(!store.canExport)
             }
             // Menus follow the screen: View and Present exist only in the workspace.
             if store.stage == .work {

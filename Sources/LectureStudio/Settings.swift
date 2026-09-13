@@ -79,6 +79,33 @@ enum AppSettings {
         get { defaults.dictionary(forKey: "shortcuts") as? [String: String] ?? [:] }
         set { defaults.set(newValue, forKey: "shortcuts") }
     }
+    /// Export: a marp-cli to use instead of the one found (a binary or its folder), and a browser marp-cli
+    /// cannot find on its own. Empty means "find it".
+    static var marpPath: String {
+        get { defaults.string(forKey: "marpPath") ?? "" }
+        set { defaults.set(newValue, forKey: "marpPath") }
+    }
+    static var browserPath: String {
+        get { defaults.string(forKey: "exportBrowserPath") ?? "" }
+        set { defaults.set(newValue, forKey: "exportBrowserPath") }
+    }
+    /// The last export's choices, so the sheet opens the way it was left.
+    static var exportOptions: ExportOptions {
+        get {
+            var o = ExportOptions()
+            if let f = defaults.string(forKey: "exportFormat").flatMap(ExportFormat.init(rawValue:)) { o.format = f }
+            o.pdfNotes = defaults.bool(forKey: "exportPdfNotes")
+            o.pdfOutlines = defaults.object(forKey: "exportPdfOutlines") as? Bool ?? true
+            o.pptxEditable = defaults.bool(forKey: "exportPptxEditable")
+            return o
+        }
+        set {
+            defaults.set(newValue.format.rawValue, forKey: "exportFormat")
+            defaults.set(newValue.pdfNotes, forKey: "exportPdfNotes")
+            defaults.set(newValue.pdfOutlines, forKey: "exportPdfOutlines")
+            defaults.set(newValue.pptxEditable, forKey: "exportPptxEditable")
+        }
+    }
     static var checklistHidden: Bool {
         get { defaults.bool(forKey: "gettingStartedHidden") }
         set { defaults.set(newValue, forKey: "gettingStartedHidden") }

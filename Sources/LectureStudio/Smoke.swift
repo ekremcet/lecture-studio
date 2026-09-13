@@ -69,6 +69,60 @@ enum Smoke {
             note("editor probe: \(eprobe ?? "nil")")
             await store.runQa()
             if let qa = store.qa { note("qa: slides=\(qa.slides.count) overflow=\(qa.overflowPages) missing=\(qa.missingImagePages)") }
+            // `STUDIO_SMOKE_EXPORT=1` runs marp-cli on the open deck, into the smoke folder (never next to the deck).
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_EXPORT"] == "1", let fs = store.repo {
+                await store.exporter.probe(force: true)
+                switch store.exporter.status {
+                case .ready(let t): note("export tool: \(t.label) source=\(t.source.rawValue) path=\(t.path)")
+                case .missing(let e): note("export tool missing: \(e.message) \(e.hint ?? "")")
+                default: note("export tool: \(store.exporter.status)")
+                }
+                let deck = fs.root.appendingPathComponent(store.filePath)
+                let base = (deck.lastPathComponent as NSString).deletingPathExtension
+                for o in [ExportOptions(format: .pdf, pdfNotes: true, pdfOutlines: true), ExportOptions(format: .pptx)] {
+                    let output = out.appendingPathComponent("\(base).\(o.format.fileExtension)")
+                    try? FileManager.default.removeItem(at: output)
+                    switch await store.exporter.export(deck: deck, output: output, options: o) {
+                    case .success(let r):
+                        let size = (try? FileManager.default.attributesOfItem(atPath: r.output.path)[.size] as? Int) ?? -1
+                        note("export \(o.format.rawValue): \(r.output.lastPathComponent) bytes=\(size) seconds=\(String(format: "%.1f", r.seconds)) warnings=\(r.warnings)")
+                    case .failure(let e):
+                        note("export \(o.format.rawValue) failed: \(e.kind) \(e.message) \(e.hint ?? "")")
+                    }
+                }
+                // A cancel a second in: the run ends as cancelled and leaves no marp or browser behind.
+                if ProcessInfo.processInfo.environment["STUDIO_SMOKE_EXPORT_CANCEL"] == "1" {
+                    let output = out.appendingPathComponent("\(base)-cancelled.pdf")
+                    Task { try? await Task.sleep(nanoseconds: 1_000_000_000); store.exporter.cancel() }
+                    let t0 = Date()
+                    let r = await store.exporter.export(deck: deck, output: output, options: ExportOptions(format: .pdf))
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    let ps = Process()
+                    ps.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+                    ps.arguments = ["-fl", "marp-cli|headless"]
+                    let pipe = Pipe(); ps.standardOutput = pipe
+                    try? ps.run(); ps.waitUntilExit()
+                    let left = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n").count
+                    switch r {
+                    case .success: note("export cancel: finished anyway after \(String(format: "%.1f", Date().timeIntervalSince(t0))) s")
+                    case .failure(let e): note("export cancel: kind=\(e.kind) after \(String(format: "%.1f", Date().timeIntervalSince(t0))) s file=\(FileManager.default.fileExists(atPath: output.path)) leftover processes=\(left)")
+                    }
+                }
+                // The sheet as the user sees it, with what was found.
+                store.dialog = .export
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                if let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) {
+                    _ = await Snapshot.captureWindow(w, to: out.appendingPathComponent("export-window.png"))
+                    if let sheet = w.attachedSheet {
+                        let shot = Process()
+                        shot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                        shot.arguments = ["-x", "-o", "-l", String(sheet.windowNumber), out.appendingPathComponent("export-sheet.png").path]
+                        try? shot.run(); shot.waitUntilExit()
+                    } else { note("export sheet: no attached sheet") }
+                }
+                store.dialog = nil
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
             let slide = Int(ProcessInfo.processInfo.environment["STUDIO_SMOKE_SLIDE"] ?? "") ?? 3
             store.goToSlide(min(slide, max(0, store.slideCount - 1)), from: "rail")
             try? await Task.sleep(nanoseconds: 1_500_000_000)

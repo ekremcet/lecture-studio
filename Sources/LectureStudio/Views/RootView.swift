@@ -33,6 +33,7 @@ struct RootView: View {
             case .compare: CompareSheet()
             case .remove: RemoveCourseSheet()
             case .marpHelp: MarpHelpSheet()
+            case .export: ExportSheet()
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -91,12 +92,15 @@ struct SettingsView: View {
     @State private var shortcutMessage = ""
     @State private var formats: [LectureFormat] = []
     @State private var breakText = String(AppSettings.breakMinutes)
+    @State private var marpPath = AppSettings.marpPath
+    @State private var browserPath = AppSettings.browserPath
 
     var body: some View {
         TabView {
             Form { librarySection }.formStyle(.grouped).tabItem { Label("Library", systemImage: "folder") }
             Form { teachingSection }.formStyle(.grouped).tabItem { Label("Teaching", systemImage: "timer") }
             Form { oberikSection }.formStyle(.grouped).tabItem { Label("Agent", systemImage: "sparkles") }
+            Form { exportSection }.formStyle(.grouped).tabItem { Label("Export", systemImage: "square.and.arrow.up") }
             Form { shortcutsSection }.formStyle(.grouped).tabItem { Label("Shortcuts", systemImage: "keyboard") }
         }
         .frame(width: 540, height: 500)
@@ -201,6 +205,71 @@ struct SettingsView: View {
                 Button("Reset all to defaults") { store.resetShortcuts(); shortcutMessage = "" }
                     .disabled(store.shortcuts.overrides.isEmpty)
             }
+    }
+
+    /// Export runs marp-cli; the app finds it (shell PATH, Homebrew, npm, npx) unless a path is given here.
+    @ViewBuilder var exportSection: some View {
+        Section {
+            HStack(alignment: .top, spacing: 8) {
+                switch store.exporter.status {
+                case .unknown, .probing:
+                    ProgressView().controlSize(.small)
+                    Text("Looking for marp-cli…").foregroundStyle(.secondary)
+                case .ready(let t):
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(t.label), from \(t.origin)")
+                        Text(t.command.joined(separator: " ")).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                case .missing(let e):
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(e.message)
+                        if let h = e.hint { Text(h).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                    }
+                }
+                Spacer()
+                Button("Look again") { store.exporter.settingsChanged() }.controlSize(.small)
+            }
+            HStack {
+                TextField("marp-cli path (optional)", text: $marpPath).font(.system(.body, design: .monospaced))
+                Button("Choose…") {
+                    let p = NSOpenPanel()
+                    p.canChooseFiles = true
+                    p.canChooseDirectories = true
+                    p.showsHiddenFiles = true
+                    p.message = "The marp executable, or the folder that holds it"
+                    if p.runModal() == .OK, let u = p.url { marpPath = u.path }
+                }
+            }
+            .onChange(of: marpPath) { _, v in AppSettings.marpPath = v.trimmed; store.exporter.settingsChanged() }
+        } header: {
+            Text("marp-cli")
+        } footer: {
+            Text("Export hands the deck to marp-cli, the command-line Marp. The app looks in your shell's PATH, Homebrew, npm's global folder, node version managers and the npx cache, and falls back to `npx @marp-team/marp-cli`; a path here comes first. Install it with `brew install marp-cli` or `npm install -g @marp-team/marp-cli`.").font(.caption).foregroundStyle(.secondary)
+        }
+        Section {
+            let browsers = Exporter.installedBrowsers()
+            Text(browsers.isEmpty ? "No Chrome, Edge, Chromium or Firefox in Applications." : "In Applications: \(browsers.joined(separator: ", ")).").foregroundStyle(.secondary)
+            HStack {
+                TextField("Browser executable (optional)", text: $browserPath).font(.system(.body, design: .monospaced))
+                Button("Choose…") {
+                    let p = NSOpenPanel()
+                    p.canChooseFiles = true
+                    p.canChooseDirectories = false
+                    p.showsHiddenFiles = true
+                    p.treatsFilePackagesAsDirectories = true
+                    p.message = "The browser's executable, e.g. Google Chrome.app/Contents/MacOS/Google Chrome"
+                    if p.runModal() == .OK, let u = p.url { browserPath = u.path }
+                }
+            }
+            .onChange(of: browserPath) { _, v in AppSettings.browserPath = v.trimmed }
+            Text(Exporter.libreOfficeInstalled() ? "LibreOffice is installed: the experimental editable PowerPoint is available." : "Editable PowerPoint (experimental) also needs LibreOffice, which is not installed. The plain PowerPoint, one image per slide, needs only the browser.").font(.caption).foregroundStyle(.secondary)
+        } header: {
+            Text("Browser")
+        } footer: {
+            Text("PDF and PowerPoint are printed by a browser: Google Chrome, Microsoft Edge, Chromium or Firefox. marp-cli finds them in Applications on its own; name one here only when it lives elsewhere (passed as --browser-path).").font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder var oberikSection: some View {

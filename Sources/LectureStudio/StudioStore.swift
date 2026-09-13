@@ -3,7 +3,7 @@ import SwiftUI
 import StudioCore
 
 enum Stage { case noRepo, lectures, weeks, work }
-enum Dialog: Identifiable { case lecture, talk, editLecture, week, file, sources, profile, importCourse, newTerm, compare, remove, marpHelp; var id: Self { self } }
+enum Dialog: Identifiable { case lecture, talk, editLecture, week, file, sources, profile, importCourse, newTerm, compare, remove, marpHelp, export; var id: Self { self } }
 enum PanelId: String, CaseIterable, Identifiable { case chat, preview, editor; var id: String { rawValue } }
 enum SyncSide { case editor, preview }
 
@@ -108,6 +108,7 @@ final class StudioStore {
     let editor = EditorController()
     let agent = AgentBridge()
     let presentation = Presentation()
+    let exporter = Exporter()
     private var conversations: [String: Conversation] = [:]
     var models: OberikControl.Models?
     var model: String = AppSettings.model
@@ -502,6 +503,14 @@ final class StudioStore {
 
     /// Only a deck that is open in the workspace can be presented.
     var canPresent: Bool { stage == .work && isDeck && !filePath.isEmpty }
+    /// And exported: marp-cli reads the file on disk.
+    var canExport: Bool { canPresent && repo != nil }
+
+    /// Export to PDF or PowerPoint: the sheet asks the format and the file, marp-cli does the rest.
+    func exportDeck() {
+        guard canExport else { return }
+        dialog = .export
+    }
 
     /// Presenter mode: slides on the second screen, notes and the next slide on this one.
     func startPresentation() {

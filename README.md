@@ -27,8 +27,8 @@ a `sources/` folder, ask for an outline, and get a Marp deck that cites those so
 questions, and an instructor guide. Everything stays as plain files on disk, so the decks work with any Marp
 toolchain and any editor.
 
-- **Decks are Markdown.** One `.md` file per deck, rendered live with Marp Core. Export to PDF or PowerPoint with
-  [marp-cli](https://github.com/marp-team/marp-cli) or any Marp tool.
+- **Decks are Markdown.** One `.md` file per deck, rendered live with Marp Core. The Export button (⇧⌘E) hands
+  the deck to [marp-cli](https://github.com/marp-team/marp-cli) for a PDF or a PowerPoint; any Marp tool works too.
 - **Every claim cites a source.** Sources are indexed per course and per unit; the assistant searches them and
   cites them under the answer instead of writing from memory.
 - **Notes, questions, guide.** Speaker notes slide by slide, retrieval questions, and an instructor guide from the

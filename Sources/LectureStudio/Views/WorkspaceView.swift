@@ -59,6 +59,8 @@ struct WorkspaceView: View {
             Divider().frame(height: 16)
             if store.isDeck {
                 Button { store.startPresentation() } label: { Label("Present", systemImage: "play.rectangle") }.controlSize(.small).help("Presenter mode: slides on the other screen, notes here (⌥⌘P)")
+                Button { store.exportDeck() } label: { BusyLabel(busy: store.exporter.busy, idle: "Export", working: "Exporting…", icon: "square.and.arrow.up") }.controlSize(.small).disabled(!store.canExport)
+                    .help("Export this deck to PDF or PowerPoint with marp-cli (\(store.shortcut(for: .exportDeck)?.display ?? "⇧⌘E"))")
             }
             if store.isDeck {
                 Toggle(isOn: Binding(get: { store.showNotes }, set: { _ in store.toggleNotes() })) { Image(systemName: "note.text") }.toggleStyle(.button).controlSize(.small).help(store.showNotes ? "Hide speaker notes" : "Show speaker notes under the preview")
