@@ -59,6 +59,11 @@ struct WeekPickerView: View {
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.button).menuIndicator(.hidden).fixedSize().help("Terms, comparison, archive")
             }
             VStack(spacing: 0) {
+                // The syllabus is part of the course: its own row above the units, never among "other files".
+                if !talk {
+                    syllabusRow
+                    Divider()
+                }
                 if list.isEmpty || noUnits {
                     EmptyBlock(icon: "calendar", title: "No \(word)s yet", description: store.sourceCount > 0
                         ? "The course has \(store.sourceCount) source file\(store.sourceCount == 1 ? "" : "s"). Create the first \(word); its deck opens with a title slide, and the chat can outline it from the sources."
@@ -76,7 +81,11 @@ struct WeekPickerView: View {
                 }
                 // Numbered units only; everything else (course root files, research, scripts) folds below.
                 let numbered = talk ? list.filter { $0.unit.isEmpty } : list.filter { parseUnit($0.unit) != nil }
-                let other = list.filter { u in !numbered.contains { $0.unit == u.unit } }
+                let other = list.compactMap { u -> (unit: String, files: [FileInfo])? in
+                    if numbered.contains(where: { $0.unit == u.unit }) { return nil }
+                    let files = u.files.filter { !store.isSyllabus($0) }
+                    return files.isEmpty ? nil : (u.unit, files)
+                }
                 ForEach(Array(numbered.enumerated()), id: \.element.unit) { idx, entry in
                     if idx > 0 { Divider() }
                     unitRow(entry.unit, entry.files, compact: !talk)
@@ -151,6 +160,32 @@ struct WeekPickerView: View {
     }
 
     @State private var showOther = false
+
+    /// The course's syllabus: open it, or write one from the template. Its first heading is the subtitle.
+    var syllabusRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if let s = store.syllabus {
+                Button { store.openSyllabus() } label: {
+                    HStack(spacing: 10) {
+                        Label("Syllabus", systemImage: "list.bullet.clipboard").font(.callout.weight(.medium)).frame(width: 96, alignment: .leading)
+                        Text(s.title.isEmpty ? s.name : s.title).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help("Open the syllabus; the course chat can draft and revise it")
+            } else {
+                Label("Syllabus", systemImage: "list.bullet.clipboard").font(.callout.weight(.medium)).frame(width: 96, alignment: .leading)
+                Text("Not written yet").font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("Create syllabus") { store.createSyllabus() }.controlSize(.small)
+                    .help("Writes syllabus.md from the template with the course title, code and term; the course chat fills in the rest")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
 
     func unitRow(_ unit: String, _ list: [FileInfo], compact: Bool) -> some View {
         let main = primary(list)

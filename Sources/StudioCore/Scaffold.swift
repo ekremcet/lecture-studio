@@ -183,6 +183,19 @@ public struct Scaffold {
         return out
     }
 
+    /// The syllabus of an existing course, from the template and what the course already knows about
+    /// itself (title, code, term, unit word); returns its path.
+    public func syllabus(course: String) throws -> String {
+        let path = "\(course)/\(SYLLABUS_FILE)"
+        if fs.exists(path) { throw RepoFileError.exists(path) }
+        let profile = ProfileStore(fs: fs).read()
+        let lecture = LectureMetaStore(fs: fs).read(course)
+        let meta = courseMeta(fs: fs, course: course)
+        let input = Templates.LectureInput(code: meta.code, name: meta.courseName.isEmpty ? Labels.courseLabel(course, lecture) : meta.courseName, language: lecture.language ?? profile.language ?? "English", semester: (lecture.term ?? "").isEmpty ? "TBD" : lecture.term!, profile: profile, unitLabel: meta.unitPrefix)
+        try fs.createText(path, Templates.syllabus(input))
+        return path
+    }
+
     public func week(course: String, week: Int, topic: String, withGuide: Bool, date: String? = nil) throws -> Created {
         if week < 1 || week > 99 { throw RepoPathError("the unit number must be between 1 and 99") }
         if topic.trimmed.isEmpty { throw RepoPathError("topic is required") }

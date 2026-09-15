@@ -298,6 +298,9 @@ final class StudioStore {
     var isText: Bool { TEXT_KINDS.contains(kind) }
     var previewText: String { dirty ? editorText : diskText }
     var unitFiles: [FileInfo] { files.filter { $0.course == course && $0.unit == (unit ?? "") } }
+    /// The course's syllabus, when it has one: `syllabus.md` at the course root.
+    var syllabus: FileInfo? { files.first { $0.course == course && $0.unit.isEmpty && $0.name == SYLLABUS_FILE } }
+    func isSyllabus(_ f: FileInfo) -> Bool { f.unit.isEmpty && f.name == SYLLABUS_FILE }
     var notes: [String] { isDeck && showNotes ? Slides.notes(previewText, starts: starts, index: current) : [] }
     var hasCourse: Bool { files.contains { $0.course != "(root)" } }
     var checklist: GettingStartedState? {
@@ -324,6 +327,24 @@ final class StudioStore {
     }
 
     func backToUnits() { unit = nil; rememberPlace(); Task { await refreshSourceCount() } }
+
+    /// The syllabus opens at the course level (no unit), so the chat is the course chat.
+    func openSyllabus() {
+        guard let s = syllabus else { return }
+        openUnit("", path: s.path)
+    }
+
+    /// Write the syllabus from the template and open it.
+    func createSyllabus() {
+        guard let fs = repo, !course.isEmpty, course != "(root)" else { return }
+        do {
+            let path = try Scaffold(fs: fs).syllabus(course: course)
+            Task {
+                await refreshFiles()
+                openUnit("", path: path)
+            }
+        } catch { toasts.error("Could not create the syllabus", error) }
+    }
     func backToLectures() { course = ""; unit = nil; sourceCount = 0; rememberPlace() }
 
     /// Every term of the same course: folders linked by `derivedFrom` in either direction, newest first.

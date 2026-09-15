@@ -633,3 +633,22 @@ final class ShortcutTests: XCTestCase {
         XCTAssertEqual(t.shortcut(for: .save), Shortcut("s", .command))
     }
 }
+
+final class SyllabusTests: XCTestCase {
+    func testSyllabusForExistingCourse() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("syllabus-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let fs = RepoFS(root: tmp)
+        let sc = Scaffold(fs: fs)
+        let r = try sc.lecture(code: "CS101", name: "Intro", language: "English", semester: "Fall 2026", unitPrefix: "week", withSyllabus: false, withContext: false)
+        XCTAssertFalse(fs.exists("\(r.course)/\(SYLLABUS_FILE)"))
+        let path = try sc.syllabus(course: r.course)
+        XCTAssertEqual(path, "\(r.course)/syllabus.md")
+        let text = try fs.readString(path)
+        XCTAssertTrue(text.contains("**Title:** Intro"), text.prefix(200).description)
+        XCTAssertTrue(text.contains("**Code:** CS101"))
+        XCTAssertTrue(text.contains("Fall 2026"))
+        XCTAssertThrowsError(try sc.syllabus(course: r.course))
+    }
+}

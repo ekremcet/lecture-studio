@@ -39,7 +39,10 @@ struct WorkspaceView: View {
             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
             Picker("", selection: Binding(get: { store.filePath }, set: { p in if !p.isEmpty { Task { await store.openFile(p, select: false) } } })) {
                 if store.filePath.isEmpty { Text("Choose a file").tag("") }
-                ForEach(fileItems, id: \.self) { p in Text(store.unitFiles.contains { $0.path == p } ? (p as NSString).lastPathComponent : p).tag(p) }
+                ForEach(fileItems, id: \.self) { p in
+                    let f = store.unitFiles.first { $0.path == p }
+                    Text(f.map { store.isSyllabus($0) ? "Syllabus" : $0.name } ?? p).tag(p)
+                }
             }.labelsHidden().fixedSize().font(.system(.caption, design: .monospaced))
             Button { store.dialog = .file } label: { Image(systemName: "doc.badge.plus") }.buttonStyle(.plain).foregroundStyle(.secondary).help("New file in this \(store.word)")
             Button { store.dialog = .sources } label: {

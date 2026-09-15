@@ -1,6 +1,8 @@
 import Foundation
 
 public let META_FILE = "studio.json"
+/// The course's syllabus, at the course root. Part of the course, not one file among others.
+public let SYLLABUS_FILE = "syllabus.md"
 
 /// The presenter profile at the repo root.
 public struct ProfileStore {
