@@ -3,7 +3,7 @@ import SwiftUI
 import StudioCore
 
 enum Stage { case noRepo, lectures, weeks, work }
-enum Dialog: Identifiable { case lecture, talk, editLecture, week, file, sources, profile, importCourse, newTerm, compare, remove, marpHelp, export; var id: Self { self } }
+enum Dialog: Identifiable { case lecture, talk, editLecture, week, file, sources, profile, importCourse, newTerm, compare, remove, marpHelp, export, publish; var id: Self { self } }
 enum PanelId: String, CaseIterable, Identifiable { case chat, preview, editor; var id: String { rawValue } }
 enum SyncSide { case editor, preview }
 

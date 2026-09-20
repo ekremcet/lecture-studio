@@ -47,6 +47,7 @@ struct WeekPickerView: View {
                 }
                 Spacer()
                 if !talk { Button { store.dialog = .week } label: { Label("New \(word)", systemImage: "plus") } }
+                if !talk { Button { store.dialog = .publish } label: { Label("Publish…", systemImage: "arrow.up.circle") }.help("Send the decks, PDFs and syllabus to your page on lecture.studio") }
                 Menu {
                     Button { store.dialog = .newTerm } label: { Label("New term from this course…", systemImage: "calendar.badge.plus") }
                     Button { store.dialog = .compare } label: { Label("Compare with another term…", systemImage: "arrow.left.arrow.right") }.disabled(store.terms(of: store.course).count < 2)

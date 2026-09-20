@@ -25,6 +25,16 @@ enum AppSettings {
         get { Keychain.read(service: service, account: "oberikProjectKey") ?? "" }
         set { Keychain.write(service: service, account: "oberikProjectKey", value: newValue) }
     }
+    /// The personal token from lecture.studio/settings (Mac app section); publishing courses uses it.
+    static var platformToken: String {
+        get { Keychain.read(service: service, account: "platformToken") ?? "" }
+        set { Keychain.write(service: service, account: "platformToken", value: newValue) }
+    }
+    /// Where the platform lives; only a development server changes it.
+    static var platformOrigin: String {
+        get { defaults.string(forKey: "platformOrigin") ?? "https://lecture.studio" }
+        set { defaults.set(newValue, forKey: "platformOrigin") }
+    }
     static var model: String {
         get { defaults.string(forKey: "chatModel") ?? "" }
         set { defaults.set(newValue, forKey: "chatModel") }

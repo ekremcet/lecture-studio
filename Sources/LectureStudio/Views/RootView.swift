@@ -34,6 +34,7 @@ struct RootView: View {
             case .remove: RemoveCourseSheet()
             case .marpHelp: MarpHelpSheet()
             case .export: ExportSheet()
+            case .publish: PublishSheet()
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -93,6 +94,10 @@ struct SettingsView: View {
     @State private var formats: [LectureFormat] = []
     @State private var breakText = String(AppSettings.breakMinutes)
     @State private var marpPath = AppSettings.marpPath
+    @State private var platformToken = AppSettings.platformToken
+    @State private var platformOrigin = AppSettings.platformOrigin
+    @State private var platformStatus = ""
+    @State private var platformTesting = false
     @State private var browserPath = AppSettings.browserPath
 
     var body: some View {
@@ -101,6 +106,7 @@ struct SettingsView: View {
             Form { teachingSection }.formStyle(.grouped).tabItem { Label("Teaching", systemImage: "timer") }
             Form { oberikSection }.formStyle(.grouped).tabItem { Label("Agent", systemImage: "sparkles") }
             Form { exportSection }.formStyle(.grouped).tabItem { Label("Export", systemImage: "square.and.arrow.up") }
+            Form { publishSection }.formStyle(.grouped).tabItem { Label("Publish", systemImage: "arrow.up.circle") }
             Form { shortcutsSection }.formStyle(.grouped).tabItem { Label("Shortcuts", systemImage: "keyboard") }
         }
         .frame(width: 540, height: 500)
@@ -269,6 +275,41 @@ struct SettingsView: View {
             Text("Browser")
         } footer: {
             Text("PDF and PowerPoint are printed by a browser: Google Chrome, Microsoft Edge, Chromium or Firefox. marp-cli finds them in Applications on its own; name one here only when it lives elsewhere (passed as --browser-path).").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The lecture.studio account this Mac publishes to: a personal token created on the website.
+    @ViewBuilder var publishSection: some View {
+        Section("Your page on lecture.studio") {
+            Text("Publishing sends a course's decks, PDFs and syllabus to your page at lecture.studio/@you, where students get each week's materials on lecture day. It needs a personal token: sign in on the website, open Settings › Mac app, create a token and paste it here. A token can do everything your account can, so keep it to yourself.").font(.callout).foregroundStyle(.secondary)
+            Button { NSWorkspace.shared.open(URL(string: platformOrigin.trimmed + "/settings#mac") ?? URL(string: "https://lecture.studio/settings")!) } label: { Label("Create a token on lecture.studio", systemImage: "safari") }
+        }
+        Section("Token") {
+            SecureField("lst_…", text: $platformToken)
+                .onChange(of: platformToken) { _, v in AppSettings.platformToken = v.trimmed; platformStatus = "" }
+            HStack {
+                Button { testPlatform() } label: { BusyLabel(busy: platformTesting, idle: "Test", working: "Testing…") }.disabled(platformTesting || platformToken.trimmed.isEmpty)
+                if !platformStatus.isEmpty { Text(platformStatus).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+        Section {
+            TextField("https://lecture.studio", text: $platformOrigin).font(.system(.body, design: .monospaced))
+                .onChange(of: platformOrigin) { _, v in AppSettings.platformOrigin = v.trimmed.isEmpty ? "https://lecture.studio" : v.trimmed }
+        } header: { Text("Server") } footer: {
+            Text("Leave this alone unless you run the platform yourself.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    func testPlatform() {
+        guard let origin = URL(string: platformOrigin.trimmed) else { platformStatus = "The server address is not a URL."; return }
+        platformTesting = true
+        let client = PlatformClient(origin: origin, token: platformToken.trimmed)
+        Task {
+            do {
+                let me = try await client.me()
+                platformStatus = "Signed in as @\(me.handle)\(me.courses.isEmpty ? "" : ", \(me.courses.count) course\(me.courses.count == 1 ? "" : "s") on the page")."
+            } catch { platformStatus = error.localizedDescription }
+            platformTesting = false
         }
     }
 

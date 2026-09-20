@@ -48,6 +48,29 @@ enum Smoke {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             note("stage=\(store.stage) course=\(course) word=\(store.word) talk=\(store.talk) sourceCount=\(store.sourceCount) scope=\(store.lectureScope.label)")
             await Snapshot.capture(to: out.appendingPathComponent("weeks"))
+            // STUDIO_SMOKE_PUBLISH=show|run opens the publish sheet against STUDIO_SMOKE_PUBLISH_ORIGIN with
+            // STUDIO_SMOKE_PUBLISH_TOKEN; "run" also presses Publish (the sheet reads the same variable).
+            if let mode = ProcessInfo.processInfo.environment["STUDIO_SMOKE_PUBLISH"] {
+                let env = ProcessInfo.processInfo.environment
+                if let o = env["STUDIO_SMOKE_PUBLISH_ORIGIN"] { AppSettings.platformOrigin = o }
+                if let t = env["STUDIO_SMOKE_PUBLISH_TOKEN"] { AppSettings.platformToken = t }
+                store.dialog = .publish
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                @MainActor func sheetShot(_ name: String) {
+                    guard let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }), let sheet = w.attachedSheet else { note("publish: no attached sheet"); return }
+                    let shot = Process()
+                    shot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    shot.arguments = ["-x", "-o", "-l", String(sheet.windowNumber), out.appendingPathComponent(name).path]
+                    try? shot.run(); shot.waitUntilExit()
+                }
+                sheetShot("publish-review.png")
+                if mode == "run" {
+                    try? await Task.sleep(nanoseconds: 20_000_000_000)
+                    sheetShot("publish-done.png")
+                }
+                store.dialog = nil
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
             let units = Set(store.files.filter { $0.course == course }.map(\.unit)).sorted(by: Labels.sortUnits)
             guard let deck = store.files.first(where: { $0.course == course && $0.kind == .deck }) else { note("no deck in \(course); units=\(units)"); return }
             store.openUnit(deck.unit, path: deck.path)
