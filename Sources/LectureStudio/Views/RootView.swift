@@ -278,19 +278,22 @@ struct SettingsView: View {
         }
     }
 
-    /// The lecture.studio account this Mac publishes to: a personal token created on the website.
+    /// The lecture.studio account this Mac publishes to: connected through the website, or a pasted token.
     @ViewBuilder var publishSection: some View {
         Section("Your page on lecture.studio") {
-            Text("Publishing sends a course's decks, PDFs and syllabus to your page at lecture.studio/@you, where students get each week's materials on lecture day. It needs a personal token: sign in on the website, open Settings › Mac app, create a token and paste it here. A token can do everything your account can, so keep it to yourself.").font(.callout).foregroundStyle(.secondary)
-            Button { NSWorkspace.shared.open(URL(string: platformOrigin.trimmed + "/settings#mac") ?? URL(string: "https://lecture.studio/settings")!) } label: { Label("Create a token on lecture.studio", systemImage: "safari") }
+            Text("Publishing sends a course's decks, PDFs and syllabus to your page at lecture.studio/@you, where students get each week's materials on lecture day. Connect once: the website signs you in and hands the app a token.").font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Button { store.connectPlatform() } label: { Label(store.platformHandle == nil ? "Connect lecture.studio" : "Connect again", systemImage: "link") }.buttonStyle(.borderedProminent)
+                if let h = store.platformHandle { Label("Connected as @\(h)", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                else if !platformToken.trimmed.isEmpty { Label("A token is set", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+                Button { testPlatform() } label: { BusyLabel(busy: platformTesting, idle: "Test", working: "Testing…") }.disabled(platformTesting || AppSettings.platformToken.trimmed.isEmpty)
+            }
+            if !platformStatus.isEmpty { Text(platformStatus).font(.caption).foregroundStyle(.secondary) }
         }
         Section("Token") {
-            SecureField("lst_…", text: $platformToken)
+            SecureField("Paste a token from lecture.studio/settings instead", text: $platformToken)
                 .onChange(of: platformToken) { _, v in AppSettings.platformToken = v.trimmed; platformStatus = "" }
-            HStack {
-                Button { testPlatform() } label: { BusyLabel(busy: platformTesting, idle: "Test", working: "Testing…") }.disabled(platformTesting || platformToken.trimmed.isEmpty)
-                if !platformStatus.isEmpty { Text(platformStatus).font(.caption).foregroundStyle(.secondary) }
-            }
+            Text("A token can do everything your account can. Revoke it on the website under Settings › Mac app if a Mac is lost.").font(.caption).foregroundStyle(.secondary)
         }
         Section {
             TextField("https://lecture.studio", text: $platformOrigin).font(.system(.body, design: .monospaced))
@@ -303,10 +306,13 @@ struct SettingsView: View {
     func testPlatform() {
         guard let origin = URL(string: platformOrigin.trimmed) else { platformStatus = "The server address is not a URL."; return }
         platformTesting = true
-        let client = PlatformClient(origin: origin, token: platformToken.trimmed)
+        let client = PlatformClient(origin: origin, token: AppSettings.platformToken.trimmed)
         Task {
             do {
                 let me = try await client.me()
+                AppSettings.platformHandle = me.handle
+                store.platformHandle = me.handle
+                platformToken = AppSettings.platformToken
                 platformStatus = "Signed in as @\(me.handle)\(me.courses.isEmpty ? "" : ", \(me.courses.count) course\(me.courses.count == 1 ? "" : "s") on the page")."
             } catch { platformStatus = error.localizedDescription }
             platformTesting = false

@@ -16,6 +16,7 @@ struct LectureStudioApp: App {
                 .environment(store)
                 .frame(minWidth: 960, minHeight: 600)
                 .onAppear { Smoke.run(store: store) }
+                .onOpenURL { url in store.handleURL(url) }
         }
         .windowToolbarStyle(.unifiedCompact)
         .commands {

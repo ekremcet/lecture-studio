@@ -109,6 +109,12 @@ final class StudioStore {
     let agent = AgentBridge()
     let presentation = Presentation()
     let exporter = Exporter()
+    /// lecture.studio: the connected username, per-unit publish marks of the open course, and which unit a
+    /// Publish sheet is for (nil: the whole course).
+    var platformHandle: String? = AppSettings.platformHandle.isEmpty ? nil : AppSettings.platformHandle
+    var publishStates: [Int: PublishState] = [:]
+    var publishRecord: PublishRecord?
+    var publishUnit: Int? = nil
     private var conversations: [String: Conversation] = [:]
     var models: OberikControl.Models?
     var model: String = AppSettings.model
@@ -311,6 +317,7 @@ final class StudioStore {
     }
 
     func selectCourse(_ c: String) {
+        defer { refreshPublishState() }
         course = c
         unit = nil
         rememberPlace()
@@ -531,6 +538,55 @@ final class StudioStore {
     func exportDeck() {
         guard canExport else { return }
         dialog = .export
+    }
+
+    // MARK: lecture.studio
+
+    /// Open the website's connect page; it hands the token back through lecturestudio://connect.
+    func connectPlatform() {
+        NSWorkspace.shared.open(URL(string: AppSettings.platformOrigin.trimmingCharacters(in: .whitespaces) + "/connect") ?? URL(string: "https://lecture.studio/connect")!)
+    }
+
+    /// `lecturestudio://connect?token=…&handle=…` from the website.
+    func handleURL(_ url: URL) {
+        guard url.scheme == "lecturestudio", url.host == "connect", let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
+        let token = items.first { $0.name == "token" }?.value ?? ""
+        let handle = items.first { $0.name == "handle" }?.value ?? ""
+        guard token.hasPrefix("lst_") else { toasts.show(.error, "Could not connect lecture.studio", "The link carried no token."); return }
+        AppSettings.platformToken = token
+        AppSettings.platformHandle = handle
+        platformHandle = handle.isEmpty ? nil : handle
+        toasts.show(.success, "Connected to lecture.studio", handle.isEmpty ? "The app can publish your courses now." : "Publishing as @\(handle).")
+        refreshPublishState()
+    }
+
+    /// Open the Publish sheet for the whole course or one unit.
+    func publishCourse(unit: Int? = nil) {
+        guard !course.isEmpty, !talk else { return }
+        publishUnit = unit
+        dialog = .publish
+    }
+
+    /// Compare the course folder against the last publish record: which units are published, changed, or
+    /// not there yet. Hashing runs off the main actor; the marks land when it is done.
+    func refreshPublishState() {
+        guard let fs = repo, !course.isEmpty, let meta = lectures[course] else { publishStates = [:]; publishRecord = nil; return }
+        let c = course
+        let record = PublishRecord.read(fs: fs, course: c)
+        publishRecord = record
+        guard record != nil else { publishStates = [:]; return }
+        let cm = courseMeta(fs: fs, course: c)
+        let themes = WebHost.resource("themes")
+        Task.detached(priority: .utility) {
+            let plan = Publish.plan(fs: fs, course: c, meta: meta, courseMeta: cm, themeDirs: [themes])
+            let states = PublishStatus.states(plan: plan, record: record) { item in
+                switch item.source {
+                case .repo(let rel): return (try? fs.readBytes(rel)).map(PlatformClient.sha256)
+                case .file(let url): return (try? Data(contentsOf: url)).map(PlatformClient.sha256)
+                }
+            }
+            await MainActor.run { if self.course == c { self.publishStates = states } }
+        }
     }
 
     /// Presenter mode: slides on the second screen, notes and the next slide on this one.

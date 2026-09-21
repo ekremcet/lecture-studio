@@ -54,6 +54,8 @@ enum Smoke {
                 let env = ProcessInfo.processInfo.environment
                 if let o = env["STUDIO_SMOKE_PUBLISH_ORIGIN"] { AppSettings.platformOrigin = o }
                 if let t = env["STUDIO_SMOKE_PUBLISH_TOKEN"] { AppSettings.platformToken = t }
+                // STUDIO_SMOKE_PUBLISH_UNIT=<n> publishes one unit only.
+                store.publishUnit = env["STUDIO_SMOKE_PUBLISH_UNIT"].flatMap(Int.init)
                 store.dialog = .publish
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
                 @MainActor func sheetShot(_ name: String) {
@@ -69,7 +71,9 @@ enum Smoke {
                     sheetShot("publish-done.png")
                 }
                 store.dialog = nil
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                note("publish states: \(store.publishStates.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value.rawValue)" }.joined(separator: " "))")
+                await Snapshot.capture(to: out.appendingPathComponent("weeks-after"))
             }
             let units = Set(store.files.filter { $0.course == course }.map(\.unit)).sorted(by: Labels.sortUnits)
             guard let deck = store.files.first(where: { $0.course == course && $0.kind == .deck }) else { note("no deck in \(course); units=\(units)"); return }

@@ -17,6 +17,8 @@ struct PlatformClient: Sendable {
     struct Ensured: Decodable, Sendable { var created: Bool; var slug: String; var url: String; var visibility: String }
     struct RemoteFile: Decodable, Sendable { var week: Int?; var path: String; var sha256: String; var size: Int; var kind: String; var visibility: String }
     struct Uploaded: Decodable, Sendable { var path: String; var week: Int?; var sha256: String; var replaced: Bool; var url: String }
+    struct CourseDetails: Decodable, Sendable { var slug: String; var title: String; var visibility: String; var joins_locked: Bool; var join_url: String?; var students: Int; var url: String }
+    struct SettingsPatch: Encodable, Sendable { var visibility: String?; var joins_locked: Bool?; var rotate_join_link: Bool? }
 
     private struct ErrorBody: Decodable { var error: String }
     private struct FilesBody: Decodable { var files: [RemoteFile] }
@@ -39,6 +41,12 @@ struct PlatformClient: Sendable {
 
     func ensure(_ e: Ensure) async throws -> Ensured {
         try await send("api/courses", method: "POST", body: try JSONEncoder().encode(e), contentType: "application/json")
+    }
+
+    func course(_ slug: String) async throws -> CourseDetails { try await get("api/courses/\(slug)") }
+
+    func settings(_ slug: String, _ patch: SettingsPatch) async throws -> CourseDetails {
+        try await send("api/courses/\(slug)/settings", method: "POST", body: try JSONEncoder().encode(patch), contentType: "application/json")
     }
 
     func files(_ slug: String) async throws -> [RemoteFile] {

@@ -47,7 +47,10 @@ struct WeekPickerView: View {
                 }
                 Spacer()
                 if !talk { Button { store.dialog = .week } label: { Label("New \(word)", systemImage: "plus") } }
-                if !talk { Button { store.dialog = .publish } label: { Label("Publish…", systemImage: "arrow.up.circle") }.help("Send the decks, PDFs and syllabus to your page on lecture.studio") }
+                if !talk {
+                    let changed = store.publishStates.values.filter { $0 == .changed }.count
+                    Button { store.publishCourse() } label: { Label(changed > 0 ? "Publish… (\(changed) changed)" : "Publish…", systemImage: "arrow.up.circle") }.help("Send the decks, PDFs and syllabus to your page on lecture.studio")
+                }
                 Menu {
                     Button { store.dialog = .newTerm } label: { Label("New term from this course…", systemImage: "calendar.badge.plus") }
                     Button { store.dialog = .compare } label: { Label("Compare with another term…", systemImage: "arrow.left.arrow.right") }.disabled(store.terms(of: store.course).count < 2)
@@ -202,6 +205,9 @@ struct WeekPickerView: View {
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
+            if let n = parseUnit(unit)?.n, let state = store.publishStates[n] {
+                publishMark(state, n)
+            }
             if compact {
                 Text("\(list.count) file\(list.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.tertiary)
             } else {
@@ -217,6 +223,17 @@ struct WeekPickerView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+}
+
+extension WeekPickerView {
+    /// The unit's standing on lecture.studio: published as is, changed since, or not sent yet.
+    @ViewBuilder func publishMark(_ state: PublishState, _ n: Int) -> some View {
+        switch state {
+        case .published: Label("published", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green).labelStyle(.titleAndIcon).help("On lecture.studio as it is here")
+        case .changed: Button { store.publishCourse(unit: n) } label: { Label("changed", systemImage: "arrow.up.circle") }.font(.caption).foregroundStyle(.orange).buttonStyle(.plain).help("Changed since the last publish. Click to publish this \(store.word)")
+        case .never: Button { store.publishCourse(unit: n) } label: { Label("not published", systemImage: "circle.dotted") }.font(.caption).foregroundStyle(.secondary).buttonStyle(.plain).help("Not on lecture.studio yet. Click to publish this \(store.word)")
+        }
     }
 }
 

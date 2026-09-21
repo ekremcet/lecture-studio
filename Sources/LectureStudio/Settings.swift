@@ -30,6 +30,11 @@ enum AppSettings {
         get { Keychain.read(service: service, account: "platformToken") ?? "" }
         set { Keychain.write(service: service, account: "platformToken", value: newValue) }
     }
+    /// The username the connected token belongs to, for the Settings pane; empty until Connect ran.
+    static var platformHandle: String {
+        get { defaults.string(forKey: "platformHandle") ?? "" }
+        set { defaults.set(newValue, forKey: "platformHandle") }
+    }
     /// Where the platform lives; only a development server changes it.
     static var platformOrigin: String {
         get { defaults.string(forKey: "platformOrigin") ?? "https://lecture.studio" }

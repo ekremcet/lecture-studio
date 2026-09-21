@@ -16,5 +16,12 @@
     <key>NSHumanReadableCopyright</key><string>© 2026 Ekrem Cetinkaya</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>lecture.studio connect</string>
+            <key>CFBundleURLSchemes</key><array><string>lecturestudio</string></array>
+        </dict>
+    </array>
 </dict>
 </plist>
