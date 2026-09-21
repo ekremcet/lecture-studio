@@ -245,6 +245,11 @@ struct PublishSheet: View {
         do {
             let me = try await client.me()
             handle = me.handle
+            // The token says who is connected; keep the app's idea of the account in step with it.
+            if AppSettings.platformHandle != me.handle {
+                AppSettings.platformHandle = me.handle; store.platformHandle = me.handle
+                store.refreshPublishState()
+            }
             existing = me.courses.first { $0.slug == p.slug }
             if existing != nil {
                 let files = try await client.files(p.slug)

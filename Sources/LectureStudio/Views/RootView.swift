@@ -292,7 +292,13 @@ struct SettingsView: View {
         }
         Section("Token") {
             SecureField("Paste a token from lecture.studio/settings instead", text: $platformToken)
-                .onChange(of: platformToken) { _, v in AppSettings.platformToken = v.trimmed; platformStatus = "" }
+                .onChange(of: platformToken) { _, v in
+                    guard v.trimmed != AppSettings.platformToken else { return }
+                    // Another token may be another account: the handle is learned again from Test or the next publish.
+                    AppSettings.platformToken = v.trimmed; platformStatus = ""
+                    AppSettings.platformHandle = ""; store.platformHandle = nil
+                    store.refreshPublishState()
+                }
             Text("A token can do everything your account can. Revoke it on the website under Settings › Mac app if a Mac is lost.").font(.caption).foregroundStyle(.secondary)
         }
         Section {
@@ -312,6 +318,7 @@ struct SettingsView: View {
                 let me = try await client.me()
                 AppSettings.platformHandle = me.handle
                 store.platformHandle = me.handle
+                store.refreshPublishState()
                 platformToken = AppSettings.platformToken
                 platformStatus = "Signed in as @\(me.handle)\(me.courses.isEmpty ? "" : ", \(me.courses.count) course\(me.courses.count == 1 ? "" : "s") on the page")."
             } catch { platformStatus = error.localizedDescription }
