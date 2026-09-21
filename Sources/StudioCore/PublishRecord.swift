@@ -1,15 +1,24 @@
 import Foundation
 
 /// What the last publish sent, kept in the course folder (`.studio/published.json`) so it travels with the
-/// repository: the remote course, when, and the hash of every file at that moment. The course screen compares
-/// the files on disk against it to say which units changed since.
+/// repository: the account it went to, the remote course, when, and the hash of every file at that moment.
+/// The course screen compares the files on disk against it to say which units changed since, but only while
+/// that same account is connected: another account's page does not have these files.
 public struct PublishRecord: Codable, Equatable, Sendable {
+    /// The lecture.studio handle the publish went to; nil in records written before it was kept.
+    public var handle: String?
     public var slug: String
     public var url: String
     public var at: String
     /// item id ("unit/path") to sha256
     public var files: [String: String]
-    public init(slug: String, url: String, at: String, files: [String: String]) { self.slug = slug; self.url = url; self.at = at; self.files = files }
+    public init(handle: String? = nil, slug: String, url: String, at: String, files: [String: String]) { self.handle = handle; self.slug = slug; self.url = url; self.at = at; self.files = files }
+
+    /// Does this record describe the connected account's page? A record without a handle belongs to nobody.
+    public func belongs(to handle: String?) -> Bool {
+        guard let mine = self.handle, let handle, !handle.isEmpty else { return false }
+        return mine.lowercased() == handle.lowercased()
+    }
 
     public static let file = ".studio/published.json"
     public static func path(course: String) -> String { "\(course)/\(file)" }

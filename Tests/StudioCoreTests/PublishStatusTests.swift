@@ -25,6 +25,16 @@ final class PublishStatusTests: XCTestCase {
         XCTAssertEqual(states, [1: .never, 2: .never])
     }
 
+    func testRecordBelongsToTheAccountItWentTo() throws {
+        let r = PublishRecord(handle: "Ekrem", slug: "c", url: "u", at: "t", files: [:])
+        XCTAssertTrue(r.belongs(to: "ekrem"))
+        XCTAssertFalse(r.belongs(to: "someone-else"))
+        XCTAssertFalse(r.belongs(to: nil), "not connected: no marks")
+        XCTAssertFalse(PublishRecord(slug: "c", url: "u", at: "t", files: [:]).belongs(to: "ekrem"), "a record without a handle belongs to nobody")
+        let old = try JSONDecoder().decode(PublishRecord.self, from: Data("{\"slug\":\"c\",\"url\":\"u\",\"at\":\"t\",\"files\":{}}".utf8))
+        XCTAssertNil(old.handle, "records written before the handle was kept still decode")
+    }
+
     func testNewFileInPublishedUnitIsChanged() {
         let p = plan([item(1, "week1-slides.md"), item(1, "week1-slides.pdf")])
         let record = PublishRecord(slug: "c", url: "u", at: "t", files: ["1/week1-slides.md": "a"])

@@ -49,7 +49,7 @@ struct WeekPickerView: View {
                 if !talk { Button { store.dialog = .week } label: { Label("New \(word)", systemImage: "plus") } }
                 if !talk {
                     let changed = store.publishStates.values.filter { $0 == .changed }.count
-                    Button { store.publishCourse() } label: { Label(changed > 0 ? "Publish… (\(changed) changed)" : "Publish…", systemImage: "arrow.up.circle") }.help("Send the decks, PDFs and syllabus to your page on lecture.studio")
+                    Button { store.publishCourse() } label: { Label(changed > 0 ? "Publish… (\(changed) changed)" : "Publish…", systemImage: "arrow.up.circle") }.help("Send the PDFs to your page on lecture.studio")
                 }
                 Menu {
                     Button { store.dialog = .newTerm } label: { Label("New term from this course…", systemImage: "calendar.badge.plus") }

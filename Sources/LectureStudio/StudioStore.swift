@@ -572,7 +572,8 @@ final class StudioStore {
     func refreshPublishState() {
         guard let fs = repo, !course.isEmpty, let meta = lectures[course] else { publishStates = [:]; publishRecord = nil; return }
         let c = course
-        let record = PublishRecord.read(fs: fs, course: c)
+        // Only the connected account's record counts: another account's page does not have these files.
+        let record = PublishRecord.read(fs: fs, course: c).flatMap { $0.belongs(to: platformHandle) ? $0 : nil }
         publishRecord = record
         guard record != nil else { publishStates = [:]; return }
         let cm = courseMeta(fs: fs, course: c)

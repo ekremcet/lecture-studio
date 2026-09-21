@@ -68,7 +68,7 @@ struct WorkspaceView: View {
             if store.isDeck, !store.talk, let n = store.unit.flatMap({ parseUnit($0)?.n }) {
                 let state = store.publishStates[n]
                 Button { store.publishCourse(unit: n) } label: { Label(state == .published ? "Published" : "Publish \(store.word)", systemImage: state == .published ? "checkmark.circle" : "arrow.up.circle") }.controlSize(.small).disabled(store.dirty)
-                    .help(store.dirty ? "Save first, then publish this \(store.word) to lecture.studio" : state == .changed ? "Changed since the last publish: send this \(store.word) to lecture.studio" : "Send this \(store.word)'s deck, PDF and images to lecture.studio")
+                    .help(store.dirty ? "Save first, then publish this \(store.word) to lecture.studio" : state == .changed ? "Changed since the last publish: send this \(store.word) to lecture.studio" : "Send this \(store.word)'s PDF to lecture.studio")
             }
             if store.isDeck {
                 Toggle(isOn: Binding(get: { store.showNotes }, set: { _ in store.toggleNotes() })) { Image(systemName: "note.text") }.toggleStyle(.button).controlSize(.small).help(store.showNotes ? "Hide speaker notes" : "Show speaker notes under the preview")

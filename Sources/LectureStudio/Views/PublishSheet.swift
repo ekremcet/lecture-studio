@@ -38,7 +38,7 @@ struct PublishSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DialogHeader(title: unit.map { "Publish \(plan?.unitLabel ?? "Week") \($0) of \(Labels.courseLabel(store.course, store.meta))" } ?? "Publish \(Labels.courseLabel(store.course, store.meta))", icon: "arrow.up.circle", description: "Sends the decks as Marp Markdown with their themes and images, the exported PDFs and the syllabus to your page on lecture.studio. Students see each \(plan?.unitLabel.lowercased() ?? "week") from its lecture date. Instructor guides and solutions never leave this Mac.")
+            DialogHeader(title: unit.map { "Publish \(plan?.unitLabel ?? "Week") \($0) of \(Labels.courseLabel(store.course, store.meta))" } ?? "Publish \(Labels.courseLabel(store.course, store.meta))", icon: "arrow.up.circle", description: "Sends PDFs to your page on lecture.studio: the PDF exported from each \(plan?.unitLabel.lowercased() ?? "week")'s deck, and any other PDF you tick. Decks, images and themes stay on this Mac. Students see each \(plan?.unitLabel.lowercased() ?? "week") from its lecture date. Instructor guides and solutions never leave this Mac.")
             switch phase {
             case .loading: HStack { ProgressView().controlSize(.small); Text("Reading the course and your page…").foregroundStyle(.secondary) }
             case .noToken: noTokenBody
@@ -83,6 +83,14 @@ struct PublishSheet: View {
                     }
                 }
             }
+            HStack(spacing: 6) {
+                Text("PDFs to send").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Button("Select all") { selectAll(true) }.help("Tick every PDF")
+                Button("Deselect all") { selectAll(false) }.help("Untick every PDF")
+                Button("Deck PDFs only") { selectDeckPdfs() }.help("Tick only the PDF exported from each \(plan.unitLabel.lowercased())'s deck; other PDFs stay on this Mac")
+            }
+            .controlSize(.small)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(units.keys.sorted { ($0 ?? 0) < ($1 ?? 0) }, id: \.self) { u in
@@ -90,6 +98,9 @@ struct PublishSheet: View {
                             Text(u.map { "\(plan.unitLabel) \($0)\(plan.topics[$0].map { ": \($0)" } ?? "")" } ?? "Course files").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                             ForEach(units[u] ?? []) { item in itemRow(item) }
                         }
+                    }
+                    if plan.items.isEmpty {
+                        Text(plan.decks.isEmpty ? "No PDFs in this course yet." : "No PDFs yet: tick the export below, or export the decks first (⇧⌘E).").font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
                     }
                     if !plan.heldBack.isEmpty {
                         Text("Held back (instructor material): \(plan.heldBack.joined(separator: ", "))").font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
@@ -101,11 +112,11 @@ struct PublishSheet: View {
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
-            let missing = unitsMissingPdf(plan)
+            let missing = plan.unitsMissingPdf
             if !missing.isEmpty {
                 Toggle(isOn: $exportMissing) {
                     Text(store.exporter.status.tool != nil
-                         ? "Export the missing PDFs with marp-cli first (\(plan.unitLabel.lowercased())\(missing.count == 1 ? "" : "s") \(missing.map(String.init).joined(separator: ", ")))"
+                         ? "Export the missing PDFs with marp-cli first, into each \(plan.unitLabel.lowercased())'s folder (\(plan.unitLabel.lowercased())\(missing.count == 1 ? "" : "s") \(missing.map(String.init).joined(separator: ", ")))"
                          : "Export the missing PDFs first (\(missing.count)): marp-cli was not found, see Settings › Export")
                         .fixedSize(horizontal: false, vertical: true)
                 }.disabled(store.exporter.status.tool == nil)
@@ -115,7 +126,7 @@ struct PublishSheet: View {
                 Text(toSend.isEmpty ? "Everything selected is already up to date." : "\(toSend.count) file\(toSend.count == 1 ? "" : "s") to send, \(ByteCountFormatter.string(fromByteCount: Int64(toSend.reduce(0) { $0 + $1.size }), countStyle: .file))").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button { publish() } label: { Label(existing == nil ? "Create and publish" : "Publish", systemImage: "arrow.up.circle") }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(plan.items.allSatisfy { !$0.selected })
+                Button { publish() } label: { Label(existing == nil ? "Create and publish" : "Publish", systemImage: "arrow.up.circle") }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(plan.items.allSatisfy { !$0.selected } && !(exportMissing && store.exporter.status.tool != nil && !missing.isEmpty))
             }
         }
     }
@@ -195,15 +206,20 @@ struct PublishSheet: View {
         guard let r = remote[key(item)] else { return false }
         return r.size == item.size && (hashes[key(item)].map { $0 == r.sha256 } ?? true)
     }
-    func unitsMissingPdf(_ plan: PublishPlan) -> [Int] {
-        let withDeck = Set(plan.items.filter { $0.kind == .deck && $0.selected }.compactMap(\.unit))
-        let withPdf = Set(plan.items.filter { $0.kind == .pdf }.compactMap(\.unit))
-        return withDeck.subtracting(withPdf).sorted()
-    }
-
     func setSelected(_ item: PublishItem, _ v: Bool) {
         guard var p = plan, let i = p.items.firstIndex(where: { $0.id == item.id }) else { return }
         p.items[i].selected = v
+        plan = p
+    }
+    /// Files over the size limit never get ticked.
+    func selectAll(_ v: Bool) {
+        guard var p = plan else { return }
+        for i in p.items.indices { p.items[i].selected = v && p.items[i].size <= Publish.maxBytes }
+        plan = p
+    }
+    func selectDeckPdfs() {
+        guard var p = plan else { return }
+        for i in p.items.indices { p.items[i].selected = p.isDeckPdf(p.items[i]) && p.items[i].size <= Publish.maxBytes }
         plan = p
     }
 
@@ -221,8 +237,9 @@ struct PublishSheet: View {
         let cm = courseMeta(fs: fs, course: course)
         var p = Publish.plan(fs: fs, course: course, meta: meta, courseMeta: cm, themeDirs: [WebHost.resource("themes")])
         if let unit {
-            // One unit: its files, plus the themes its deck needs; everything else stays out of the way.
-            p.items = p.items.filter { $0.unit == unit || $0.kind == .theme }
+            // One unit: its PDFs; everything else stays out of the way.
+            p.items = p.items.filter { $0.unit == unit }
+            p.decks = p.decks.filter { $0.key == unit }
         }
         plan = p
         do {
@@ -250,7 +267,7 @@ struct PublishSheet: View {
         guard let client, var p = plan, let fs = store.repo else { return }
         skipped = p.items.filter { $0.selected && isUpToDate($0) }.count
         uploaded = 0; exported = 0; exportFailures = []
-        let toExport = exportMissing && store.exporter.status.tool != nil ? unitsMissingPdf(p) : []
+        let toExport = exportMissing && store.exporter.status.tool != nil ? p.unitsMissingPdf : []
         progress = (0, p.items.filter { $0.selected && !isUpToDate($0) }.count + toExport.count, "Starting…")
         phase = .publishing
         let course = store.course
@@ -261,7 +278,7 @@ struct PublishSheet: View {
                 // Missing PDFs first, into the unit folder next to the deck, so students get them too.
                 for u in toExport {
                     try Task.checkCancellation()
-                    guard let deck = p.items.first(where: { $0.unit == u && $0.kind == .deck }), case .repo(let rel) = deck.source else { continue }
+                    guard let rel = p.decks[u] else { continue }
                     progress.current = "Exporting \(p.unitLabel.lowercased()) \(u) to PDF…"
                     let deckURL = try fs.resolve(rel)
                     let pdfRel = (rel as NSString).deletingPathExtension + ".pdf"
@@ -293,8 +310,9 @@ struct PublishSheet: View {
                     try? await client.setWeek(p.slug, n, topic: topic)
                 }
                 // The record: what the page has now, for the course screen's published/changed marks.
-                var record = PublishRecord.read(fs: fs, course: course) ?? PublishRecord(slug: p.slug, url: ensured.url, at: "", files: [:])
-                record.slug = p.slug; record.url = ensured.url; record.at = ISO8601DateFormatter().string(from: Date())
+                // A record from another account is not this page's: start over.
+                var record = PublishRecord.read(fs: fs, course: course).flatMap { $0.belongs(to: handle) ? $0 : nil } ?? PublishRecord(handle: handle, slug: p.slug, url: ensured.url, at: "", files: [:])
+                record.handle = handle; record.slug = p.slug; record.url = ensured.url; record.at = ISO8601DateFormatter().string(from: Date())
                 for item in p.items where item.selected { if let s = sent[item.id] ?? hashes[item.id] ?? remote[item.id]?.sha256 { record.files[item.id] = s } }
                 try? record.write(fs: fs, course: course)
                 details = try? await client.course(p.slug)
