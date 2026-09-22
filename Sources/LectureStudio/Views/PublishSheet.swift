@@ -278,7 +278,7 @@ struct PublishSheet: View {
         let course = store.course
         publishTask = Task {
             do {
-                let ensured = try await client.ensure(PlatformClient.Ensure(slug: p.slug, code: p.code, title: p.title, term: p.term, description: nil, start_date: p.startDate, week_count: p.weekCount, cancelled_dates: p.cancelledDates, visibility: existing == nil ? visibility : nil, unit_label: p.unitLabel))
+                let ensured = try await client.ensure(PlatformClient.Ensure(slug: p.slug, code: p.code, title: p.title, term: p.term, description: nil, start_date: p.startDate, week_count: p.weekCount, cancelled_dates: p.cancelledDates.isEmpty ? nil : p.cancelledDates, visibility: existing == nil ? visibility : nil, unit_label: p.unitLabel))
                 courseURL = URL(string: ensured.url)
                 // Missing PDFs first, into the unit folder next to the deck, so students get them too.
                 for u in toExport {

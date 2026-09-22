@@ -13,7 +13,7 @@ struct PlatformClient: Sendable {
         var slug: String; var code: String?; var title: String; var term: String?; var visibility: String; var start_date: String?; var week_count: Int; var url: String
         var id: String { slug }
     }
-    struct Ensure: Encodable, Sendable { var slug: String; var code: String?; var title: String; var term: String?; var description: String?; var start_date: String?; var week_count: Int; var cancelled_dates: [String]; var visibility: String?; var unit_label: String? }
+    struct Ensure: Encodable, Sendable { var slug: String; var code: String?; var title: String; var term: String?; var description: String?; var start_date: String?; var week_count: Int; var cancelled_dates: [String]?; var visibility: String?; var unit_label: String? }
     struct Ensured: Decodable, Sendable { var created: Bool; var slug: String; var url: String; var visibility: String }
     struct RemoteFile: Decodable, Sendable { var week: Int?; var path: String; var sha256: String; var size: Int; var kind: String; var visibility: String }
     struct Uploaded: Decodable, Sendable { var path: String; var week: Int?; var sha256: String; var replaced: Bool; var url: String }
