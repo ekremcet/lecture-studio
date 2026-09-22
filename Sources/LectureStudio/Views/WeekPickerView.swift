@@ -47,10 +47,8 @@ struct WeekPickerView: View {
                 }
                 Spacer()
                 if !talk { Button { store.dialog = .week } label: { Label("New \(word)", systemImage: "plus") } }
-                if !talk {
-                    let changed = store.publishStates.values.filter { $0 == .changed }.count
-                    Button { store.publishCourse() } label: { Label(changed > 0 ? "Publish… (\(changed) changed)" : "Publish…", systemImage: "arrow.up.circle") }.help("Send the PDFs to your page on lecture.studio")
-                }
+                let changed = store.publishStates.values.filter { $0 == .changed }.count
+                Button { store.publishCourse() } label: { Label(changed > 0 ? (talk ? "Publish… (changed)" : "Publish… (\(changed) changed)") : "Publish…", systemImage: "arrow.up.circle") }.help(talk ? "Send the talk's PDF to your page on lecture.studio" : "Send the PDFs to your page on lecture.studio")
                 Menu {
                     Button { store.dialog = .newTerm } label: { Label("New term from this course…", systemImage: "calendar.badge.plus") }
                     Button { store.dialog = .compare } label: { Label("Compare with another term…", systemImage: "arrow.left.arrow.right") }.disabled(store.terms(of: store.course).count < 2)
@@ -207,6 +205,8 @@ struct WeekPickerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             if let n = parseUnit(unit)?.n, let state = store.publishStates[n] {
                 publishMark(state, n)
+            } else if store.talk, unit.isEmpty, let state = store.publishStates[0] {
+                publishMark(state, nil)
             }
             if compact {
                 Text("\(list.count) file\(list.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.tertiary)
@@ -228,11 +228,12 @@ struct WeekPickerView: View {
 
 extension WeekPickerView {
     /// The unit's standing on lecture.studio: published as is, changed since, or not sent yet.
-    @ViewBuilder func publishMark(_ state: PublishState, _ n: Int) -> some View {
+    /// `n` nil: the whole talk.
+    @ViewBuilder func publishMark(_ state: PublishState, _ n: Int?) -> some View {
         switch state {
         case .published: Label("published", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green).labelStyle(.titleAndIcon).help("On lecture.studio as it is here")
-        case .changed: Button { store.publishCourse(unit: n) } label: { Label("changed", systemImage: "arrow.up.circle") }.font(.caption).foregroundStyle(.orange).buttonStyle(.plain).help("Changed since the last publish. Click to publish this \(store.word)")
-        case .never: Button { store.publishCourse(unit: n) } label: { Label("not published", systemImage: "circle.dotted") }.font(.caption).foregroundStyle(.secondary).buttonStyle(.plain).help("Not on lecture.studio yet. Click to publish this \(store.word)")
+        case .changed: Button { store.publishCourse(unit: n) } label: { Label("changed", systemImage: "arrow.up.circle") }.font(.caption).foregroundStyle(.orange).buttonStyle(.plain).help("Changed since the last publish. Click to publish this \(n == nil ? "talk" : store.word)")
+        case .never: Button { store.publishCourse(unit: n) } label: { Label("not published", systemImage: "circle.dotted") }.font(.caption).foregroundStyle(.secondary).buttonStyle(.plain).help("Not on lecture.studio yet. Click to publish this \(n == nil ? "talk" : store.word)")
         }
     }
 }

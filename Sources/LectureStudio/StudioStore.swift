@@ -114,6 +114,8 @@ final class StudioStore {
     var platformHandle: String? = AppSettings.platformHandle.isEmpty ? nil : AppSettings.platformHandle
     var publishStates: [Int: PublishState] = [:]
     var publishRecord: PublishRecord?
+    /// Every course or talk folder's last publish to the connected account, for the library cards.
+    var publishRecords: [String: PublishRecord] = [:]
     var publishUnit: Int? = nil
     private var conversations: [String: Conversation] = [:]
     var models: OberikControl.Models?
@@ -256,6 +258,7 @@ final class StudioStore {
         let idx = await Task.detached { FilesIndex.scan(fs: fs) }.value
         files = idx.files
         lectures = idx.lectures
+        reloadPublishRecords()
         repoSources = idx.sources
         filesLoaded = true
         refreshKey += 1
@@ -562,14 +565,23 @@ final class StudioStore {
 
     /// Open the Publish sheet for the whole course or one unit.
     func publishCourse(unit: Int? = nil) {
-        guard !course.isEmpty, !talk else { return }
+        guard !course.isEmpty else { return }
         publishUnit = unit
         dialog = .publish
+    }
+
+    /// The publish records of every course and talk, kept only when they belong to the connected account.
+    func reloadPublishRecords() {
+        guard let fs = repo else { publishRecords = [:]; return }
+        var out: [String: PublishRecord] = [:]
+        for c in lectures.keys { if let r = PublishRecord.read(fs: fs, course: c), r.belongs(to: platformHandle) { out[c] = r } }
+        publishRecords = out
     }
 
     /// Compare the course folder against the last publish record: which units are published, changed, or
     /// not there yet. Hashing runs off the main actor; the marks land when it is done.
     func refreshPublishState() {
+        reloadPublishRecords()
         guard let fs = repo, !course.isEmpty, let meta = lectures[course] else { publishStates = [:]; publishRecord = nil; return }
         let c = course
         // Only the connected account's record counts: another account's page does not have these files.

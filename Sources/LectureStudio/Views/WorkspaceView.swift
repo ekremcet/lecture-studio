@@ -65,6 +65,11 @@ struct WorkspaceView: View {
                 Button { store.exportDeck() } label: { BusyLabel(busy: store.exporter.busy, idle: "Export", working: "Exporting…", icon: "square.and.arrow.up") }.controlSize(.small).disabled(!store.canExport)
                     .help("Export this deck to PDF or PowerPoint with marp-cli (\(store.shortcut(for: .exportDeck)?.display ?? "⇧⌘E"))")
             }
+            if store.isDeck, store.talk {
+                let state = store.publishStates[0]
+                Button { store.publishCourse() } label: { Label(state == .published ? "Published" : "Publish talk", systemImage: state == .published ? "checkmark.circle" : "arrow.up.circle") }.controlSize(.small).disabled(store.dirty)
+                    .help(store.dirty ? "Save first, then publish this talk to lecture.studio" : state == .changed ? "Changed since the last publish: send this talk's PDF to lecture.studio" : "Send this talk's PDF to lecture.studio")
+            }
             if store.isDeck, !store.talk, let n = store.unit.flatMap({ parseUnit($0)?.n }) {
                 let state = store.publishStates[n]
                 Button { store.publishCourse(unit: n) } label: { Label(state == .published ? "Published" : "Publish \(store.word)", systemImage: state == .published ? "checkmark.circle" : "arrow.up.circle") }.controlSize(.small).disabled(store.dirty)

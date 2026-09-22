@@ -8,12 +8,19 @@ struct PlatformClient: Sendable {
     var origin: URL
     var token: String
 
-    struct Me: Decodable, Sendable { var handle: String; var name: String?; var url: String; var courses: [Course] }
+    struct Me: Decodable, Sendable { var handle: String; var name: String?; var url: String; var courses: [Course]; var talks: [Talk]? }
+    struct Talk: Decodable, Sendable, Identifiable {
+        var slug: String; var title: String; var event: String?; var date: String?; var visibility: String; var url: String
+        var id: String { slug }
+    }
+    /// The page part of the API: a course lives under api/courses, a talk under api/talks; the calls are the same.
+    static func api(talk: Bool) -> String { talk ? "api/talks" : "api/courses" }
     struct Course: Decodable, Sendable, Identifiable {
         var slug: String; var code: String?; var title: String; var term: String?; var visibility: String; var start_date: String?; var week_count: Int; var url: String
         var id: String { slug }
     }
     struct Ensure: Encodable, Sendable { var slug: String; var code: String?; var title: String; var term: String?; var description: String?; var start_date: String?; var week_count: Int; var cancelled_dates: [String]?; var visibility: String?; var unit_label: String? }
+    struct EnsureTalk: Encodable, Sendable { var slug: String; var title: String; var event: String?; var date: String?; var visibility: String? }
     struct Ensured: Decodable, Sendable { var created: Bool; var slug: String; var url: String; var visibility: String }
     struct RemoteFile: Decodable, Sendable { var week: Int?; var path: String; var sha256: String; var size: Int; var kind: String; var visibility: String }
     struct Uploaded: Decodable, Sendable { var path: String; var week: Int?; var sha256: String; var replaced: Bool; var url: String }
@@ -43,14 +50,18 @@ struct PlatformClient: Sendable {
         try await send("api/courses", method: "POST", body: try JSONEncoder().encode(e), contentType: "application/json")
     }
 
-    func course(_ slug: String) async throws -> CourseDetails { try await get("api/courses/\(slug)") }
-
-    func settings(_ slug: String, _ patch: SettingsPatch) async throws -> CourseDetails {
-        try await send("api/courses/\(slug)/settings", method: "POST", body: try JSONEncoder().encode(patch), contentType: "application/json")
+    func ensureTalk(_ e: EnsureTalk) async throws -> Ensured {
+        try await send("api/talks", method: "POST", body: try JSONEncoder().encode(e), contentType: "application/json")
     }
 
-    func files(_ slug: String) async throws -> [RemoteFile] {
-        try await (get("api/courses/\(slug)/files") as FilesBody).files
+    func course(_ slug: String, talk: Bool = false) async throws -> CourseDetails { try await get("\(Self.api(talk: talk))/\(slug)") }
+
+    func settings(_ slug: String, _ patch: SettingsPatch, talk: Bool = false) async throws -> CourseDetails {
+        try await send("\(Self.api(talk: talk))/\(slug)/settings", method: "POST", body: try JSONEncoder().encode(patch), contentType: "application/json")
+    }
+
+    func files(_ slug: String, talk: Bool = false) async throws -> [RemoteFile] {
+        try await (get("\(Self.api(talk: talk))/\(slug)/files") as FilesBody).files
     }
 
     func setWeek(_ slug: String, _ n: Int, topic: String?) async throws {
@@ -58,7 +69,7 @@ struct PlatformClient: Sendable {
         _ = try await send("api/courses/\(slug)/weeks/\(n)", method: "POST", body: body, contentType: "application/json") as OkBody
     }
 
-    func upload(_ slug: String, week: Int?, path: String, name: String, data: Data, topic: String?) async throws -> Uploaded {
+    func upload(_ slug: String, week: Int?, path: String, name: String, data: Data, topic: String?, talk: Bool = false) async throws -> Uploaded {
         let boundary = "ls-" + UUID().uuidString
         var body = Data()
         func field(_ k: String, _ v: String) {
@@ -70,7 +81,7 @@ struct PlatformClient: Sendable {
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(name.replacingOccurrences(of: "\"", with: ""))\"\r\nContent-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
         body.append(data)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        return try await send("api/courses/\(slug)/files", method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
+        return try await send("\(Self.api(talk: talk))/\(slug)/files", method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
     }
 
     // MARK: transport

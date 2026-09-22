@@ -55,6 +55,30 @@ final class PublishTests: XCTestCase {
         XCTAssertEqual(plan.topics[1], "Hello")
     }
 
+    func testTalkPlanTicksTheDeckPdfAndRemembersTheDeck() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("publish-talk-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fs = RepoFS(root: root)
+        try fs.mkdir("keynote-2026")
+        try fs.createText("keynote-2026/studio.json", "{\"title\":\"Keynote\",\"kind\":\"talk\",\"term\":\"PyCon\"}\n")
+        try fs.createText("keynote-2026/keynote-2026.md", "---\nmarp: true\n---\n# Hi\n")
+        try fs.writeBytes("keynote-2026/keynote-2026.pdf", Data(repeating: 1, count: 9))
+        try fs.writeBytes("keynote-2026/handout.pdf", Data(repeating: 2, count: 4))
+        let meta = LectureMetaStore(fs: fs).read("keynote-2026")
+        let plan = Publish.plan(fs: fs, course: "keynote-2026", meta: meta, courseMeta: courseMeta(fs: fs, course: "keynote-2026"), themeDirs: [])
+        XCTAssertTrue(plan.talk)
+        XCTAssertEqual(plan.decks, [0: "keynote-2026/keynote-2026.md"])
+        XCTAssertEqual(Set(plan.items.map(\.id)), ["0/keynote-2026.pdf", "0/handout.pdf"])
+        XCTAssertEqual(plan.items.first { $0.id == "0/keynote-2026.pdf" }?.selected, true, "the talk's own PDF is ticked")
+        XCTAssertEqual(plan.items.first { $0.id == "0/handout.pdf" }?.selected, false)
+        XCTAssertTrue(plan.isDeckPdf(plan.items.first { $0.id == "0/keynote-2026.pdf" }!))
+        XCTAssertEqual(plan.unitsMissingPdf, [])
+        try fs.remove("keynote-2026/keynote-2026.pdf")
+        let again = Publish.plan(fs: fs, course: "keynote-2026", meta: meta, courseMeta: courseMeta(fs: fs, course: "keynote-2026"), themeDirs: [])
+        XCTAssertEqual(again.unitsMissingPdf, [0], "no PDF next to the deck: the publish exports one first")
+    }
+
     func testDeckHeadAndPrivateNames() {
         XCTAssertEqual(Publish.deckHead("---\nmarp: true\ntheme: gaia\n---\n").theme, "gaia")
         XCTAssertTrue(Publish.deckHead("---\nmarp: true\n---\n").marp)

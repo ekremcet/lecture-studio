@@ -37,16 +37,18 @@ public struct PublishPlan: Equatable, Sendable {
     /// Files left out because their names look like instructor material.
     public var heldBack: [String]
     /// Each unit's deck (repo-relative path): not sent, but a unit without a PDF gets one exported from it.
+    /// A talk's deck sits at the folder root, under 0.
     public var decks: [Int: String] = [:]
+    public var talk: Bool = false
     public var selectedBytes: Int { items.filter(\.selected).reduce(0) { $0 + $1.size } }
     /// The PDF exported from a unit's deck: same name as the deck, next to it.
     public func isDeckPdf(_ item: PublishItem) -> Bool {
-        guard item.kind == .pdf, let u = item.unit, let deck = decks[u] else { return false }
+        guard item.kind == .pdf, let deck = decks[item.unit ?? 0] else { return false }
         return (item.path as NSString).deletingPathExtension == ((deck as NSString).lastPathComponent as NSString).deletingPathExtension
     }
-    /// Units with a deck and no PDF at all: the publish exports one first when asked.
+    /// Units whose deck has no PDF named after it: the publish exports one first when asked.
     public var unitsMissingPdf: [Int] {
-        let withPdf = Set(items.filter { $0.kind == .pdf }.compactMap(\.unit))
+        let withPdf = Set(items.filter { isDeckPdf($0) }.map { $0.unit ?? 0 })
         return decks.keys.filter { !withPdf.contains($0) }.sorted()
     }
 }
@@ -118,14 +120,21 @@ public enum Publish {
             }
         }
 
-        // Course level: a syllabus PDF is ticked, other PDFs are offered.
+        // Course level: a syllabus PDF is ticked, other PDFs are offered. A talk is one folder: its deck's PDF is
+        // ticked, and the deck itself is remembered so a missing PDF can be exported first.
+        let talk = courseMeta.kind == .talk
         if let entries = try? fs.listDir(course) {
-            for e in entries where e.kind == "file" {
+            for e in entries.sorted(by: { $0.name < $1.name }) where e.kind == "file" {
                 let ext = (e.name as NSString).pathExtension.lowercased()
+                if talk, ext == "md", decks[0] == nil, !looksPrivate(e.name), deckHead((try? fs.readText("\(course)/\(e.name)", from: 1, to: 60).text) ?? "").marp { decks[0] = "\(course)/\(e.name)" }
                 guard ext == "pdf" else { continue }
                 if looksPrivate(e.name) { if worthTelling(e.name) { heldBack.append(e.name) }; continue }
                 add(PublishItem(unit: nil, path: e.name, source: .repo("\(course)/\(e.name)"), kind: .pdf, size: e.size ?? 0, selected: e.name.lowercased().hasPrefix("syllabus")))
             }
+        }
+        if talk, let deck = decks[0] {
+            let base = ((deck as NSString).lastPathComponent as NSString).deletingPathExtension
+            for i in items.indices where items[i].unit == nil && (items[i].path as NSString).deletingPathExtension == base { items[i].selected = true }
         }
 
         var weekCount = courseMeta.weeks.max() ?? 0
@@ -140,6 +149,6 @@ public enum Publish {
             slug: slug(for: course), code: Labels.courseCode(course, meta).isEmpty ? nil : Labels.courseCode(course, meta), title: Labels.courseTitle(course, meta),
             term: meta.term, startDate: meta.startDate, weekCount: max(1, min(30, weekCount)), cancelledDates: cancelled,
             unitLabel: courseMeta.unitPrefix.prefix(1).uppercased() + courseMeta.unitPrefix.dropFirst(), topics: courseMeta.topics,
-            items: items.sorted { ($0.unit ?? 0, $0.kind.rawValue, $0.path) < ($1.unit ?? 0, $1.kind.rawValue, $1.path) }, heldBack: heldBack.sorted(), decks: decks)
+            items: items.sorted { ($0.unit ?? 0, $0.kind.rawValue, $0.path) < ($1.unit ?? 0, $1.kind.rawValue, $1.path) }, heldBack: heldBack.sorted(), decks: decks, talk: talk)
     }
 }

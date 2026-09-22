@@ -10,7 +10,8 @@ struct PublishSheet: View {
     @State private var phase: Phase = .loading
     @State private var plan: PublishPlan?
     @State private var remote: [String: PlatformClient.RemoteFile] = [:]
-    @State private var existing: PlatformClient.Course?
+    /// The page's address when the course or talk is already there.
+    @State private var existingURL: String?
     @State private var details: PlatformClient.CourseDetails?
     @State private var handle = ""
     @State private var visibility = "private"
@@ -29,6 +30,8 @@ struct PublishSheet: View {
     enum Phase: Equatable { case loading, noToken, review, publishing, done, failed(String) }
 
     var unit: Int? { store.publishUnit }
+    var talk: Bool { store.talk }
+    var thing: String { talk ? "talk" : "course" }
 
     var client: PlatformClient? {
         let token = AppSettings.platformToken.trimmed
@@ -38,7 +41,9 @@ struct PublishSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DialogHeader(title: unit.map { "Publish \(plan?.unitLabel ?? "Week") \($0) of \(Labels.courseLabel(store.course, store.meta))" } ?? "Publish \(Labels.courseLabel(store.course, store.meta))", icon: "arrow.up.circle", description: "Sends PDFs to your page on lecture.studio: the PDF exported from each \(plan?.unitLabel.lowercased() ?? "week")'s deck, and any other PDF you tick. Decks, images and themes stay on this Mac. Students see each \(plan?.unitLabel.lowercased() ?? "week") from its lecture date. Instructor guides and solutions never leave this Mac.")
+            DialogHeader(title: unit.map { "Publish \(plan?.unitLabel ?? "Week") \($0) of \(Labels.courseLabel(store.course, store.meta))" } ?? "Publish \(Labels.courseLabel(store.course, store.meta))", icon: "arrow.up.circle", description: talk
+                         ? "Sends the talk's PDF to your page on lecture.studio, and any other PDF you tick. The deck, images and themes stay on this Mac."
+                         : "Sends PDFs to your page on lecture.studio: the PDF exported from each \(plan?.unitLabel.lowercased() ?? "week")'s deck, and any other PDF you tick. Decks, images and themes stay on this Mac. Students see each \(plan?.unitLabel.lowercased() ?? "week") from its lecture date. Instructor guides and solutions never leave this Mac.")
             switch phase {
             case .loading: HStack { ProgressView().controlSize(.small); Text("Reading the course and your page…").foregroundStyle(.secondary) }
             case .noToken: noTokenBody
@@ -70,15 +75,22 @@ struct PublishSheet: View {
     @ViewBuilder var reviewBody: some View {
         if let plan {
             let units = Dictionary(grouping: plan.items, by: { $0.unit })
-            LabeledField(label: "Course on lecture.studio", hint: existing.map { "Exists: \($0.url). Visibility and the join link are shown after publishing." } ?? "New: lecture.studio/@\(handle)/\(plan.slug). \(plan.startDate.map { "First lecture \($0), \(plan.weekCount) \(plan.unitLabel.lowercased())s" } ?? "No first-lecture date in the course settings, so no \(plan.unitLabel.lowercased()) opens by itself until you set one on the website.")") {
+            LabeledField(label: talk ? "Talk on lecture.studio" : "Course on lecture.studio", hint: existingURL.map { "Exists: \($0). \(talk ? "Visibility is" : "Visibility and the join link are") shown after publishing." } ?? (talk
+                ? "New: lecture.studio/@\(handle)/t/\(plan.slug)."
+                : "New: lecture.studio/@\(handle)/\(plan.slug). \(plan.startDate.map { "First lecture \($0), \(plan.weekCount) \(plan.unitLabel.lowercased())s" } ?? "No first-lecture date in the course settings, so no \(plan.unitLabel.lowercased()) opens by itself until you set one on the website.")")) {
                 HStack {
                     Text("\(plan.code.map { "\($0) · " } ?? "")\(plan.title)\(plan.term.map { " · \($0)" } ?? "")").font(.body.weight(.medium))
                     Spacer()
-                    if existing == nil {
+                    if existingURL == nil {
                         Picker("", selection: $visibility) {
-                            Text("Private (join link)").tag("private")
-                            Text("Listed, invite only").tag("listed")
-                            Text("Public").tag("public")
+                            if talk {
+                                Text("Private (only you)").tag("private")
+                                Text("Public").tag("public")
+                            } else {
+                                Text("Private (join link)").tag("private")
+                                Text("Listed, invite only").tag("listed")
+                                Text("Public").tag("public")
+                            }
                         }.labelsHidden().frame(width: 190)
                     }
                 }
@@ -91,16 +103,20 @@ struct PublishSheet: View {
                 Button("Deck PDFs only") { selectDeckPdfs() }.help("Tick only the PDF exported from each \(plan.unitLabel.lowercased())'s deck; other PDFs stay on this Mac")
             }
             .controlSize(.small)
+            let missing = plan.unitsMissingPdf
+            let missingKeys = Set(missing.map { $0 == 0 ? nil : Optional($0) })
+            let groups = Set(units.keys).union(missingKeys).sorted { ($0 ?? 0) < ($1 ?? 0) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(units.keys.sorted { ($0 ?? 0) < ($1 ?? 0) }, id: \.self) { u in
+                    ForEach(groups, id: \.self) { u in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(u.map { "\(plan.unitLabel) \($0)\(plan.topics[$0].map { ": \($0)" } ?? "")" } ?? "Course files").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(u.map { "\(plan.unitLabel) \($0)\(plan.topics[$0].map { ": \($0)" } ?? "")" } ?? (talk ? "Talk files" : "Course files")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                             ForEach(units[u] ?? []) { item in itemRow(item) }
+                            if missingKeys.contains(u), let deck = plan.decks[u ?? 0] { missingRow(deck) }
                         }
                     }
-                    if plan.items.isEmpty {
-                        Text(plan.decks.isEmpty ? "No PDFs in this course yet." : "No PDFs yet: tick the export below, or export the decks first (⇧⌘E).").font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
+                    if plan.items.isEmpty && missing.isEmpty {
+                        Text("No PDFs in this \(thing) yet.").font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
                     }
                     if !plan.heldBack.isEmpty {
                         Text("Held back (instructor material): \(plan.heldBack.joined(separator: ", "))").font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
@@ -112,12 +128,12 @@ struct PublishSheet: View {
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
-            let missing = plan.unitsMissingPdf
             if !missing.isEmpty {
                 Toggle(isOn: $exportMissing) {
                     Text(store.exporter.status.tool != nil
-                         ? "Export the missing PDFs with marp-cli first, into each \(plan.unitLabel.lowercased())'s folder (\(plan.unitLabel.lowercased())\(missing.count == 1 ? "" : "s") \(missing.map(String.init).joined(separator: ", ")))"
-                         : "Export the missing PDFs first (\(missing.count)): marp-cli was not found, see Settings › Export")
+                         ? (talk ? "Export the talk's PDF with marp-cli first, next to the deck"
+                            : "Export the missing PDFs with marp-cli first, into each \(plan.unitLabel.lowercased())'s folder (\(plan.unitLabel.lowercased())\(missing.count == 1 ? "" : "s") \(missing.map(String.init).joined(separator: ", ")))")
+                         : "Export the missing PDF\(missing.count == 1 ? "" : "s") first (\(missing.count)): marp-cli was not found, see Settings › Export")
                         .fixedSize(horizontal: false, vertical: true)
                 }.disabled(store.exporter.status.tool == nil)
             }
@@ -126,7 +142,7 @@ struct PublishSheet: View {
                 Text(toSend.isEmpty ? "Everything selected is already up to date." : "\(toSend.count) file\(toSend.count == 1 ? "" : "s") to send, \(ByteCountFormatter.string(fromByteCount: Int64(toSend.reduce(0) { $0 + $1.size }), countStyle: .file))").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button { publish() } label: { Label(existing == nil ? "Create and publish" : "Publish", systemImage: "arrow.up.circle") }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(plan.items.allSatisfy { !$0.selected } && !(exportMissing && store.exporter.status.tool != nil && !missing.isEmpty))
+                Button { publish() } label: { Label(existingURL == nil ? "Create and publish" : "Publish", systemImage: "arrow.up.circle") }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(plan.items.allSatisfy { !$0.selected } && !(exportMissing && store.exporter.status.tool != nil && !missing.isEmpty))
             }
         }
     }
@@ -149,6 +165,24 @@ struct PublishSheet: View {
         .disabled(item.size > Publish.maxBytes)
     }
 
+    /// A deck with no PDF next to it: the PDF that the publish exports first, or the gap it leaves.
+    func missingRow(_ deck: String) -> some View {
+        let name = (((deck as NSString).lastPathComponent as NSString).deletingPathExtension) + ".pdf"
+        let willExport = exportMissing && store.exporter.status.tool != nil
+        return Toggle(isOn: .constant(willExport)) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.richtext").foregroundStyle(.tertiary).frame(width: 16)
+                Text(name).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Text(willExport ? "exported on publish" : "no PDF yet").font(.caption2).foregroundStyle(willExport ? .blue : .orange)
+                Text("").frame(width: 60)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .disabled(true)
+        .help(willExport ? "Not exported yet: marp-cli makes this PDF next to the deck during the publish" : "Not exported yet. Tick the export below, or export the deck first (⇧⌘E)")
+    }
+
     @ViewBuilder var publishingBody: some View {
         ProgressView(value: Double(progress.done), total: Double(max(1, progress.total))) {
             Text(progress.current).font(.callout)
@@ -163,14 +197,19 @@ struct PublishSheet: View {
             LabeledField(label: "Who can see it") {
                 HStack {
                     Picker("", selection: Binding(get: { d.visibility }, set: { v in setVisibility(v) })) {
-                        Text("Private (join link)").tag("private")
-                        Text("Listed, invite only").tag("listed")
-                        Text("Public").tag("public")
+                        if talk {
+                            Text("Private (only you)").tag("private")
+                            Text("Public").tag("public")
+                        } else {
+                            Text("Private (join link)").tag("private")
+                            Text("Listed, invite only").tag("listed")
+                            Text("Public").tag("public")
+                        }
                     }.labelsHidden().frame(width: 190).disabled(settingsBusy)
-                    Text("\(d.students) student\(d.students == 1 ? "" : "s") enrolled").font(.caption).foregroundStyle(.secondary)
+                    if !talk { Text("\(d.students) student\(d.students == 1 ? "" : "s") enrolled").font(.caption).foregroundStyle(.secondary) }
                 }
             }
-            LabeledField(label: "Join link", hint: d.visibility == "public" ? "The course is public; the link still puts a student on the roster." : "Share it with the class. Anyone with the link can join until you rotate it.") {
+            if !talk { LabeledField(label: "Join link", hint: d.visibility == "public" ? "The course is public; the link still puts a student on the roster." : "Share it with the class. Anyone with the link can join until you rotate it.") {
                 HStack {
                     TextField("", text: .constant(d.join_url ?? "No join link yet")).font(.system(.body, design: .monospaced)).disabled(true)
                     if let link = d.join_url {
@@ -178,10 +217,10 @@ struct PublishSheet: View {
                     }
                     Button { rotate() } label: { BusyLabel(busy: settingsBusy, idle: d.join_url == nil ? "Create" : "Rotate", working: "…") }.disabled(settingsBusy)
                 }
-            }
+            } }
         }
         HStack {
-            if let courseURL { Button { NSWorkspace.shared.open(courseURL) } label: { Label("Open the course page", systemImage: "safari") } }
+            if let courseURL { Button { NSWorkspace.shared.open(courseURL) } label: { Label("Open the \(thing) page", systemImage: "safari") } }
             Spacer()
             Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
         }
@@ -250,9 +289,9 @@ struct PublishSheet: View {
                 AppSettings.platformHandle = me.handle; store.platformHandle = me.handle
                 store.refreshPublishState()
             }
-            existing = me.courses.first { $0.slug == p.slug }
-            if existing != nil {
-                let files = try await client.files(p.slug)
+            existingURL = talk ? me.talks?.first { $0.slug == p.slug }?.url : me.courses.first { $0.slug == p.slug }?.url
+            if existingURL != nil {
+                let files = try await client.files(p.slug, talk: talk)
                 remote = Dictionary(uniqueKeysWithValues: files.map { ("\($0.week ?? 0)/\($0.path)", $0) })
                 var h: [String: String] = [:]
                 for item in p.items where remote[key(item)]?.size == item.size {
@@ -278,13 +317,15 @@ struct PublishSheet: View {
         let course = store.course
         publishTask = Task {
             do {
-                let ensured = try await client.ensure(PlatformClient.Ensure(slug: p.slug, code: p.code, title: p.title, term: p.term, description: nil, start_date: p.startDate, week_count: p.weekCount, cancelled_dates: p.cancelledDates.isEmpty ? nil : p.cancelledDates, visibility: existing == nil ? visibility : nil, unit_label: p.unitLabel))
+                let ensured = talk
+                    ? try await client.ensureTalk(PlatformClient.EnsureTalk(slug: p.slug, title: p.title, event: p.term, date: p.startDate, visibility: existingURL == nil ? visibility : nil))
+                    : try await client.ensure(PlatformClient.Ensure(slug: p.slug, code: p.code, title: p.title, term: p.term, description: nil, start_date: p.startDate, week_count: p.weekCount, cancelled_dates: p.cancelledDates.isEmpty ? nil : p.cancelledDates, visibility: existingURL == nil ? visibility : nil, unit_label: p.unitLabel))
                 courseURL = URL(string: ensured.url)
                 // Missing PDFs first, into the unit folder next to the deck, so students get them too.
                 for u in toExport {
                     try Task.checkCancellation()
                     guard let rel = p.decks[u] else { continue }
-                    progress.current = "Exporting \(p.unitLabel.lowercased()) \(u) to PDF…"
+                    progress.current = u == 0 ? "Exporting the talk to PDF…" : "Exporting \(p.unitLabel.lowercased()) \(u) to PDF…"
                     let deckURL = try fs.resolve(rel)
                     let pdfRel = (rel as NSString).deletingPathExtension + ".pdf"
                     let out = try fs.resolve(pdfRel)
@@ -292,9 +333,9 @@ struct PublishSheet: View {
                     switch await store.exporter.export(deck: deckURL, output: out, options: opts) {
                     case .success:
                         let size = (try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int) ?? 0
-                        p.items.append(PublishItem(unit: u, path: (pdfRel as NSString).lastPathComponent, source: .repo(pdfRel), kind: .pdf, size: size, selected: true))
+                        p.items.append(PublishItem(unit: u == 0 ? nil : u, path: (pdfRel as NSString).lastPathComponent, source: .repo(pdfRel), kind: .pdf, size: size, selected: true))
                         exported += 1
-                    case .failure(let e): exportFailures.append("\(p.unitLabel.lowercased()) \(u): \(e.localizedDescription)")
+                    case .failure(let e): exportFailures.append("\(u == 0 ? "talk" : "\(p.unitLabel.lowercased()) \(u)"): \(e.localizedDescription)")
                     }
                     progress.done += 1
                 }
@@ -306,12 +347,12 @@ struct PublishSheet: View {
                     try Task.checkCancellation()
                     progress.current = "Sending \(progress.done + 1) of \(progress.total): \(item.path)"
                     let d = try data(for: item)
-                    let r = try await client.upload(p.slug, week: item.unit, path: item.path, name: (item.path as NSString).lastPathComponent, data: d, topic: item.unit.flatMap { p.topics[$0] })
+                    let r = try await client.upload(p.slug, week: item.unit, path: item.path, name: (item.path as NSString).lastPathComponent, data: d, topic: item.unit.flatMap { p.topics[$0] }, talk: talk)
                     sent[item.id] = r.sha256
                     uploaded += 1
                     progress.done += 1
                 }
-                for (n, topic) in p.topics where unit == nil && items.contains(where: { $0.unit == n }) == false && !topic.isEmpty {
+                for (n, topic) in p.topics where !talk && unit == nil && items.contains(where: { $0.unit == n }) == false && !topic.isEmpty {
                     try? await client.setWeek(p.slug, n, topic: topic)
                 }
                 // The record: what the page has now, for the course screen's published/changed marks.
@@ -320,7 +361,7 @@ struct PublishSheet: View {
                 record.handle = handle; record.slug = p.slug; record.url = ensured.url; record.at = ISO8601DateFormatter().string(from: Date())
                 for item in p.items where item.selected { if let s = sent[item.id] ?? hashes[item.id] ?? remote[item.id]?.sha256 { record.files[item.id] = s } }
                 try? record.write(fs: fs, course: course)
-                details = try? await client.course(p.slug)
+                details = try? await client.course(p.slug, talk: talk)
                 phase = .done
                 store.toasts.show(.success, "Published to lecture.studio", "\(uploaded) file\(uploaded == 1 ? "" : "s") sent.")
                 await store.refreshFiles()
@@ -337,7 +378,7 @@ struct PublishSheet: View {
         guard let client, let p = plan else { return }
         settingsBusy = true
         Task {
-            do { details = try await client.settings(p.slug, PlatformClient.SettingsPatch(visibility: v, joins_locked: nil, rotate_join_link: nil)) }
+            do { details = try await client.settings(p.slug, PlatformClient.SettingsPatch(visibility: v, joins_locked: nil, rotate_join_link: nil), talk: talk) }
             catch { store.toasts.show(.error, "Could not change the visibility", error.localizedDescription) }
             settingsBusy = false
         }
