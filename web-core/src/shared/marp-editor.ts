@@ -210,6 +210,10 @@ const FORMATS: Array<{ label: string; title: string; before: string; after: stri
   { label: "Link", title: "Link", before: "[", after: "](https://)", placeholder: "text" },
 ];
 
+/** Hands a selection to the host: the text and its 1-based first and last line. */
+export type AddToChat = (text: string, fromLine: number, toLine: number) => void;
+let addToChat: AddToChat | null = null;
+
 function selectionTooltip(state: EditorState): Tooltip | null {
   const sel = state.selection.main;
   if (sel.empty) return null;
@@ -231,6 +235,27 @@ function selectionTooltip(state: EditorState): Tooltip | null {
         b.addEventListener("mousedown", (e) => {
           e.preventDefault();
           wrapSelection(view, f.before, f.after, f.placeholder);
+        });
+        dom.appendChild(b);
+      }
+      if (addToChat) {
+        const send = addToChat;
+        const sep = document.createElement("span");
+        sep.className = "cm-marp-format-sep";
+        dom.appendChild(sep);
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = "Add to chat";
+        b.title = "Quote this passage in the chat's next message";
+        b.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          const { from, to } = view.state.selection.main;
+          const text = view.state.sliceDoc(from, to);
+          if (!text.trim()) return;
+          // A selection that ends at the start of a line does not include that line.
+          const end = to > from && view.state.doc.lineAt(to).from === to ? to - 1 : to;
+          send(text, view.state.doc.lineAt(from).number, view.state.doc.lineAt(end).number);
+          view.dispatch({ selection: { anchor: to } });
         });
         dom.appendChild(b);
       }
@@ -271,9 +296,11 @@ const formatTheme = EditorView.baseTheme({
     lineHeight: "22px",
   },
   ".cm-marp-format button:hover": { background: "rgba(255,255,255,0.12)" },
+  ".cm-marp-format-sep": { width: "1px", margin: "3px 2px", background: "rgba(255,255,255,0.18)" },
 });
 
-/** A small formatting bubble above the selection: bold, italic, strike, code, link. */
-export function selectionToolbar() {
+/** A small formatting bubble above the selection: bold, italic, strike, code, link, and "Add to chat" when the host passes a handler. */
+export function selectionToolbar(opts: { onAddToChat?: AddToChat } = {}) {
+  addToChat = opts.onAddToChat ?? null;
   return [selectionTooltipField, formatTheme];
 }

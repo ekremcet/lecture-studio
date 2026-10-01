@@ -150,11 +150,14 @@ struct LecturePickerView: View {
                     if !c.units.isEmpty && !talk { Chip(text: Labels.plural(word, c.units.count), filled: true) }
                     Chip(text: "\(c.decks) decks", icon: "rectangle.on.rectangle", filled: true)
                     Chip(text: "\(c.files) files")
-                    if let r = store.publishRecords[c.course] {
-                        let published = Set(r.files.keys.compactMap { Int($0.split(separator: "/").first ?? "") }.filter { $0 > 0 }).count
-                        Chip(text: talk || published == 0 ? "published" : "\(Labels.plural(word, published)) published", icon: "checkmark.circle.fill", tint: .green, filled: true)
-                            .help("On lecture.studio: \(r.url)")
-                    }
+                }
+                // The publish chip gets its own row, kept (hidden) on every card so the chip rows line up.
+                if let r = store.publishRecords[c.course] {
+                    let published = Set(r.files.keys.compactMap { Int($0.split(separator: "/").first ?? "") }.filter { $0 > 0 }).count
+                    Chip(text: talk || published == 0 || c.units.isEmpty ? "published" : "\(published)/\(Labels.plural(word, c.units.count)) published", icon: "checkmark.circle.fill", tint: .green, filled: true)
+                        .help("On lecture.studio: \(r.url)")
+                } else {
+                    Chip(text: "published", icon: "checkmark.circle.fill").hidden()
                 }
             }
             .padding(14)

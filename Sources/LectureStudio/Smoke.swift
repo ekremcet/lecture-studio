@@ -94,6 +94,24 @@ enum Smoke {
             (() => { const ed = document.querySelector('.cm-editor'); const sc = document.querySelector('.cm-scroller'); const r = ed && ed.getBoundingClientRect(); return JSON.stringify({ editorRect: r && [r.width, r.height], scrollH: sc && sc.scrollHeight, lines: document.querySelectorAll('.cm-line').length, inner: [innerWidth, innerHeight], docLen: window.studioEditor ? window.studioEditor.getValue().length : -1 }); })()
             """)
             note("editor probe: \(eprobe ?? "nil")")
+            // `STUDIO_SMOKE_EXCERPT=1` selects lines 3–5 in the editor, presses "Add to chat" in the
+            // selection bubble, and captures the window with the quote in the composer.
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_EXCERPT"] == "1" {
+                if store.hiddenPanels.contains(.editor) { store.togglePanel(.editor) }
+                if let w = NSApp.windows.first(where: { $0.isVisible && $0.title == "Lecture Studio" }) { w.makeKeyAndOrderFront(nil); w.makeFirstResponder(store.editor.webView) }
+                _ = try? await store.editor.webView.evaluateJavaScript("""
+                window.studioEditor.selectLines(3, 5)
+                """)
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                if let w = NSApp.windows.first(where: { $0.isVisible && $0.title == "Lecture Studio" }) { _ = await Snapshot.captureWindow(w, to: out.appendingPathComponent("excerpt-bubble.png")) }
+                let pressed = try? await store.editor.webView.evaluateJavaScript("""
+                (() => { const b = [...document.querySelectorAll('.cm-marp-format button')].find(b => b.textContent === 'Add to chat'); if (!b) return 'no button'; b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); return 'pressed'; })()
+                """)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                note("excerpt: \(pressed ?? "nil") excerpts=\(store.chatExcerpts.map { "\($0.label) \($0.text.count) chars" }) chatHidden=\(store.hiddenPanels.contains(.chat))")
+                if let e = store.chatExcerpts.first { note("excerpt prompt:\n\(e.prompt)") }
+                if let w = NSApp.windows.first(where: { $0.isVisible && $0.title == "Lecture Studio" }) { _ = await Snapshot.captureWindow(w, to: out.appendingPathComponent("excerpt-window.png")) }
+            }
             await store.runQa()
             if let qa = store.qa { note("qa: slides=\(qa.slides.count) overflow=\(qa.overflowPages) missing=\(qa.missingImagePages)") }
             // `STUDIO_SMOKE_EXPORT=1` runs marp-cli on the open deck, into the smoke folder (never next to the deck).

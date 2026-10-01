@@ -46,9 +46,11 @@ public struct ChatMessage: Codable, Identifiable, Equatable {
     public var error: String?
     /// A user message sent into a running turn (steering); shown where it landed, before the reply.
     public var steering = false
+    /// Why the reply stopped early (the SDK's finish_reason: "max_tool_rounds", "no_answer", …), else nil.
+    public var stop: String?
     public init(role: Role, content: String) { self.role = role; self.content = content }
 
-    private enum CodingKeys: String, CodingKey { case id, role, content, events, attachments, citations, error, steering }
+    private enum CodingKeys: String, CodingKey { case id, role, content, events, attachments, citations, error, steering, stop }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
@@ -59,6 +61,26 @@ public struct ChatMessage: Codable, Identifiable, Equatable {
         citations = try c.decodeIfPresent([ChatCitation].self, forKey: .citations) ?? []
         error = try c.decodeIfPresent(String.self, forKey: .error)
         steering = try c.decodeIfPresent(Bool.self, forKey: .steering) ?? false
+        stop = try c.decodeIfPresent(String.self, forKey: .stop)
+    }
+
+    /// A stopped reply in words, and whether asking it to go on makes sense.
+    public var stopNotice: (text: String, canContinue: Bool)? {
+        guard role == .assistant, let stop, !stop.isEmpty else { return nil }
+        switch stop {
+        case "max_tool_rounds", "max_tool_iterations":
+            return ("Stopped at the step limit for one reply. The task is not finished; Continue picks it up where it stopped.", true)
+        case "subagents_incomplete":
+            return ("Ended while delegated work was still running, so part of the answer may be missing.", true)
+        case "no_answer":
+            return ("The assistant ended without a reply. Continue asks it again.", true)
+        case "guardrail":
+            return ("A guardrail on the Oberik project refused this message.", false)
+        case "no_model":
+            return ("The Oberik project has no model configured. Set one in the Oberik dashboard.", false)
+        default:
+            return ("Stopped early (\(stop)).", true)
+        }
     }
 }
 

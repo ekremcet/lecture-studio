@@ -12,6 +12,8 @@ final class EditorController: NSObject {
     var onChange: (String) -> Void = { _ in }
     var onLine: (Int, String) -> Void = { _, _ in }
     var onSave: () -> Void = {}
+    /// "Add to chat" on a selection: the text and its 1-based first and last line.
+    var onAddToChat: (String, Int, Int) -> Void = { _, _, _ in }
 
     override init() {
         let cfg = WebHost.configuration(bridge: bridge, replies: [], messages: ["studio"])
@@ -29,6 +31,7 @@ final class EditorController: NSObject {
             case "change": self.onChange(d["text"] as? String ?? "")
             case "line": self.onLine(d["line"] as? Int ?? 0, d["source"] as? String ?? "scroll")
             case "save": self.onSave()
+            case "addToChat": self.onAddToChat(d["text"] as? String ?? "", d["from"] as? Int ?? 1, d["to"] as? Int ?? 1)
             default: break
             }
         }

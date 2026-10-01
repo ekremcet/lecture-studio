@@ -63,6 +63,8 @@ final class StudioStore {
     /// An image the assistant attached, waiting for the save sheet. On the store, not in a closure passed
     /// down the transcript: a closure is a new value on every render and would invalidate every row.
     var savingAttachment: ChatAttachment?
+    /// Passages quoted from the editor into the chat's next message.
+    var chatExcerpts: [ChatExcerpt] = []
     /// What the import sheet works on (a folder or a deck file the user picked).
     var importSource: URL?
     var sourceCount = 0
@@ -144,6 +146,7 @@ final class StudioStore {
         }
         editor.onLine = { [weak self] line, _ in self?.onEditorLine(line) }
         editor.onSave = { [weak self] in Task { await self?.save() } }
+        editor.onAddToChat = { [weak self] text, from, to in self?.addExcerpt(text, from: from, to: to) }
         agent.onChat = { [weak self] id, event, d in self?.handleChat(id: id, event: event, d) }
         agent.onUi = { [weak self] name, args in
             guard name == "show_preview", let self else { return }
@@ -608,6 +611,14 @@ final class StudioStore {
         presentation.start(store: self, from: current)
     }
 
+    /// Quote a passage of the open file in the chat's next message, and show the chat if it is hidden.
+    func addExcerpt(_ text: String, from: Int, to: Int) {
+        guard !text.trimmed.isEmpty else { return }
+        let e = ChatExcerpt(path: filePath, from: from, to: to, text: text)
+        if !chatExcerpts.contains(where: { $0.path == e.path && $0.from == e.from && $0.to == e.to && $0.text == e.text }) { chatExcerpts.append(e) }
+        if hiddenPanels.contains(.chat) { togglePanel(.chat) }
+    }
+
     func togglePanel(_ p: PanelId) {
         var next = hiddenPanels
         if next.contains(p) { next.remove(p) } else { next.insert(p) }
@@ -1038,7 +1049,9 @@ final class StudioStore {
             let cits = decodeBridge([ChatCitation].self, r["citations"]) ?? []
             let modelName = r["model"] as? String
             let steered = r["steered"] as? [String] ?? []
+            let stop = r["finish_reason"] as? String
             conv.patchLast(now: true) { m in
+                m.stop = stop
                 if !content.isEmpty { m.content = content }
                 if !atts.isEmpty { m.attachments = atts }
                 if !cits.isEmpty { m.citations = cits }

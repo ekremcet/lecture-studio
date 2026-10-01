@@ -54,7 +54,15 @@ interface DoneOut {
   model?: string | null;
   /** Mid-turn corrections the agent read, in order (empty on an ordinary turn). */
   steered: string[];
+  /** Why the turn stopped early (e.g. "max_tool_rounds", "no_answer"), else null. */
+  finish_reason: string | null;
 }
+
+/**
+ * Rounds of app tools (file reads and edits) one turn may run. The SDK's default of 10 cut a deck
+ * reorder off halfway (2026-09-30); the project's own tool ceiling still applies on the server.
+ */
+const MAX_TOOL_ROUNDS = 60;
 
 /**
  * Token posts are coalesced. The SDK reports every token; each post re-renders the transcript in
@@ -99,6 +107,7 @@ const api = {
     const h = c.chat.stream(
       { message: input.message + (input.context ? `\n\n(${input.context})` : ""), session_id: input.session_id ?? null, enable_ask_user: true, enable_approvals: true, model: input.model || undefined, tags: input.tags, enable_rag: true, attachments: input.attachments?.length ? input.attachments : undefined },
       {
+        maxToolRounds: MAX_TOOL_ROUNDS,
         onReconnect: (attempt) => chat(id, "reconnect", { attempt }),
         onGuardrail: (stage, flags) => chat(id, "guardrail", { stage, flags }),
         onToken: (_d, full) => queueToken(id, full),
@@ -123,7 +132,7 @@ const api = {
     handles.set(id, h);
     h.done
       .then((res) => {
-        const out: DoneOut = { session_id: res.session_id, content: res.content ?? "", attachments: res.attachments ?? [], citations: res.citations ?? [], model: res.model ?? null, steered: res.steered ?? [] };
+        const out: DoneOut = { session_id: res.session_id, content: res.content ?? "", attachments: res.attachments ?? [], citations: res.citations ?? [], model: res.model ?? null, steered: res.steered ?? [], finish_reason: res.finish_reason ?? null };
         chat(id, "done", { result: out });
       })
       .catch((e) => chat(id, "error", { message: errorText(e) }))

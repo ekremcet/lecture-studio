@@ -71,7 +71,10 @@ struct ChatView: View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(conv.todos) { t in
                 HStack(spacing: 6) {
-                    if t.status == "in_progress" { ProgressView().controlSize(.mini) } else { Image(systemName: "checklist").font(.caption2) }
+                    // Spins only while a turn runs: a plan left behind by a stopped reply is paused, not working.
+                    if t.status == "in_progress" && conv.running { ProgressView().controlSize(.mini) }
+                    else if t.status == "in_progress" { Image(systemName: "pause.circle").font(.caption2).foregroundStyle(.orange) }
+                    else { Image(systemName: "checklist").font(.caption2) }
                     Text(t.content).font(.caption).strikethrough(t.status == "completed").foregroundStyle(t.status == "completed" ? .secondary : .primary)
                 }
             }
@@ -96,7 +99,9 @@ struct ChatView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if conv.messages.isEmpty { emptyState }
                         ForEach(conv.messages) { m in
-                            MessageRow(message: m, streaming: conv.running && m.role == .assistant && m.id == lastId, started: conv.running ? conv.turnStarted : nil).equatable()
+                            let last = m.id == lastId
+                            MessageRow(message: m, streaming: conv.running && m.role == .assistant && last, started: conv.running ? conv.turnStarted : nil,
+                                       onContinue: last && !conv.running ? { continueTurn() } : nil).equatable()
                         }
                         if let p = conv.pendingSteer { PendingSteerRow(text: p) }
                         ForEach(conv.queued) { q in QueuedRow(message: q, scope: scope, running: conv.running) }
@@ -182,6 +187,21 @@ struct ChatView: View {
                     }
                     return .ignored
                 }
+            if !store.chatExcerpts.isEmpty {
+                FlowRow(spacing: 4) {
+                    ForEach(store.chatExcerpts) { e in
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.quote").font(.caption2)
+                            Text(e.label).font(.caption).lineLimit(1)
+                            Button { store.chatExcerpts.removeAll { $0.id == e.id } } label: { Image(systemName: "xmark").font(.system(size: 9)) }.buttonStyle(.plain).help("Leave this passage out")
+                        }
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(.quaternary, in: Capsule())
+                        .help(e.text.count > 600 ? String(e.text.prefix(600)) + "…" : e.text)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if !pending.isEmpty {
                 FlowRow(spacing: 4) {
                     ForEach(pending) { a in
@@ -209,10 +229,10 @@ struct ChatView: View {
                         .disabled(input.trimmed.isEmpty || !pending.isEmpty)
                         .help(pending.isEmpty ? "The assistant reads this at its next step, while it keeps working (⌥⌘↩)" : "Steering carries text only; queue the files instead")
                     Button { send() } label: { Label("Queue", systemImage: "text.badge.plus") }.controlSize(.small).buttonStyle(.borderedProminent)
-                        .disabled(input.trimmed.isEmpty && pending.isEmpty)
+                        .disabled(input.trimmed.isEmpty && pending.isEmpty && store.chatExcerpts.isEmpty)
                         .help("Sent when the assistant finishes this reply (⌘↩)")
                 } else {
-                    Button { send() } label: { Label("Send", systemImage: "paperplane.fill") }.controlSize(.small).buttonStyle(.borderedProminent).disabled(input.trimmed.isEmpty && pending.isEmpty)
+                    Button { send() } label: { Label("Send", systemImage: "paperplane.fill") }.controlSize(.small).buttonStyle(.borderedProminent).disabled(input.trimmed.isEmpty && pending.isEmpty && store.chatExcerpts.isEmpty)
                 }
             }
         }
@@ -239,20 +259,31 @@ struct ChatView: View {
 
     /// Sends, or queues while the assistant works.
     func send() {
-        let text = input.trimmed
-        guard !text.isEmpty || !pending.isEmpty else { return }
+        let typed = input.trimmed
+        let quotes = store.chatExcerpts.map(\.prompt)
+        guard !typed.isEmpty || !pending.isEmpty || !quotes.isEmpty else { return }
+        let text = (quotes + (typed.isEmpty ? [] : [typed])).joined(separator: "\n\n")
         input = ""
+        store.chatExcerpts = []
         let files = pending
         pending = []
         let s = scope
         Task { await store.sendMessage(scope: s, text: text, attachments: files) }
     }
 
+    /// After a reply that stopped early: ask the same session to carry on.
+    func continueTurn() {
+        let s = scope
+        Task { await store.sendMessage(scope: s, text: "Continue the task from where you stopped. Do not redo finished steps; when everything is done, say so and summarise what changed.") }
+    }
+
     /// Into the running turn, text only.
     func steer() {
-        let text = input.trimmed
-        guard !text.isEmpty, pending.isEmpty, store.conversation(scope.key).running else { return }
+        let typed = input.trimmed
+        guard !typed.isEmpty, pending.isEmpty, store.conversation(scope.key).running else { return }
+        let text = (store.chatExcerpts.map(\.prompt) + [typed]).joined(separator: "\n\n")
         input = ""
+        store.chatExcerpts = []
         let s = scope
         Task { await store.steer(scope: s, text: text) }
     }
@@ -314,10 +345,12 @@ struct MessageRow: View, Equatable {
     var streaming: Bool
     /// When the running turn started (streaming rows only): the working panel shows the time spent.
     var started: Date? = nil
+    /// Set on the last reply when no turn is running: the Continue button of a stopped reply.
+    var onContinue: (() -> Void)? = nil
     @Environment(StudioStore.self) private var store
     @State private var stepsOpen: Bool? = nil
 
-    static func == (a: MessageRow, b: MessageRow) -> Bool { a.message == b.message && a.streaming == b.streaming && a.started == b.started }
+    static func == (a: MessageRow, b: MessageRow) -> Bool { a.message == b.message && a.streaming == b.streaming && a.started == b.started && (a.onContinue == nil) == (b.onContinue == nil) }
 
     var body: some View {
         let user = message.role == .user
@@ -336,6 +369,22 @@ struct MessageRow: View, Equatable {
             if streaming { WorkingPanel(events: message.events, started: started) }
             if let e = message.error {
                 Text(e).font(.caption).padding(8).background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.red)
+            }
+            if !streaming, let n = message.stopNotice {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(n.text).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    if n.canContinue, let onContinue {
+                        Spacer(minLength: 4)
+                        Button("Continue", action: onContinue).controlSize(.small).buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(8).frame(maxWidth: 520, alignment: .leading)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            } else if !streaming, !user, message.content.isEmpty, message.error == nil, !message.events.isEmpty {
+                // A reply that wrote nothing (or one saved before stop reasons were kept): say so instead of
+                // leaving only the steps.
+                Text("No written reply. The steps below show what it did.").font(.caption).foregroundStyle(.secondary)
             }
             if !message.events.isEmpty {
                 DisclosureGroup(isExpanded: Binding(get: { stepsOpen ?? false }, set: { stepsOpen = $0 })) {

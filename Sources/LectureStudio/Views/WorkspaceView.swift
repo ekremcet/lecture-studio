@@ -243,6 +243,9 @@ struct MarpToolbar: View {
 
     static let directives: [(String, String)] = [
         ("Lead slide (_class: lead)", "<!-- _class: lead -->\n"),
+        // A scoped style, so it works with any theme and outranks the deck's own `section h1 { text-align: left }`.
+        // Lists stay one centred block with their items aligned to the bullets.
+        ("Center everything on this slide", "<style scoped>\nsection { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }\nsection * { text-align: center; }\nsection li { text-align: left; }\n</style>\n"),
         ("No page number (_paginate: false)", "<!-- _paginate: false -->\n"),
         ("No header on this slide", "<!-- _header: \"\" -->\n"),
         ("No footer on this slide", "<!-- _footer: \"\" -->\n"),

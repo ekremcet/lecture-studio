@@ -1,6 +1,6 @@
 /**
  * The editor WKWebView: CodeMirror with Marp language support. Swift sets the text
- * and hears about edits (debounced), the line at the top or under the cursor, and ⌘S.
+ * and hears about edits (debounced), the line at the top or under the cursor, ⌘S, and passages sent to the chat.
  */
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
@@ -16,7 +16,7 @@ let dark = false;
 let kind: "markdown" | "plain" = "markdown";
 
 function langExt() {
-  if (kind === "markdown") return [...marpMarkdown({ dark }), ...selectionToolbar()];
+  if (kind === "markdown") return [...marpMarkdown({ dark }), ...selectionToolbar({ onAddToChat: (text, from, to) => post("studio", { type: "addToChat", text, from, to }) })];
   return dark ? plainDark() : [syntaxHighlighting(defaultHighlightStyle)];
 }
 
@@ -82,6 +82,13 @@ const api = {
   },
   focus() {
     view.focus();
+  },
+  /** Select whole lines (1-based, inclusive). Used by the smoke walk. */
+  selectLines(from: number, to: number) {
+    const doc = view.state.doc;
+    const a = doc.line(Math.min(Math.max(1, from), doc.lines));
+    const b = doc.line(Math.min(Math.max(from, to), doc.lines));
+    view.dispatch({ selection: { anchor: a.from, head: b.to }, scrollIntoView: true });
   },
   /**
    * Insert a Marp block at the cursor. The block starts on its own line; `{cursor}` marks where the

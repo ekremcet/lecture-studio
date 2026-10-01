@@ -62,8 +62,9 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 3) {
             if let icon { Image(systemName: icon).font(.system(size: 9)) }
-            Text(text)
+            Text(text).lineLimit(1)
         }
+        .fixedSize()
         .font(.caption2.weight(.medium))
         .padding(.horizontal, 6).padding(.vertical, 2)
         .background(filled ? tint.opacity(0.15) : Color.clear, in: Capsule())

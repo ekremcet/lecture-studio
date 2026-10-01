@@ -379,6 +379,19 @@ final class ChatArchiveTests: XCTestCase {
         XCTAssertEqual(archive.folder(scope: "cs101/week3").lastPathComponent, "cs101__week3")
     }
 
+    func testStoppedReplyKeepsItsReasonAndOffersContinue() throws {
+        var m = ChatMessage(role: .assistant, content: "")
+        XCTAssertNil(m.stopNotice)
+        m.stop = "max_tool_rounds"
+        let back = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(m))
+        XCTAssertEqual(back.stop, "max_tool_rounds")
+        XCTAssertEqual(back.stopNotice?.canContinue, true)
+        m.stop = "no_model"
+        XCTAssertEqual(m.stopNotice?.canContinue, false)
+        let older = #"{"role":"assistant","content":"done"}"#
+        XCTAssertNil(try JSONDecoder().decode(ChatMessage.self, from: Data(older.utf8)).stop)
+    }
+
     func testMessageDecodesOlderFilesAndKeepsSteering() throws {
         // A file written before `steering` existed: no key at all, and no `events` either.
         let older = #"{"id":"6DA0A90E-FB02-40FC-BB7D-6F6F7C41C153","role":"user","content":"hi"}"#

@@ -145,6 +145,25 @@ struct QueuedMessage: Identifiable, Equatable {
     var attachments: [PendingAttachment]
 }
 
+/// A passage of the open file quoted into the next message ("Add to chat" on an editor selection).
+struct ChatExcerpt: Identifiable, Equatable {
+    let id = UUID()
+    var path: String
+    var from: Int
+    var to: Int
+    var text: String
+    var lines: String { from == to ? "line \(from)" : "lines \(from)–\(to)" }
+    var label: String { "\((path as NSString).lastPathComponent) · \(lines)" }
+
+    /// The quote as the model reads it: where it comes from, then the text in a fence longer than any inside it.
+    var prompt: String {
+        var fence = "```"
+        while text.contains(fence) { fence += "`" }
+        let body = text.hasSuffix("\n") ? text : text + "\n"
+        return "From `\(path)`, \(lines):\n\(fence)markdown\n\(body)\(fence)"
+    }
+}
+
 /// A file the user attached to the next message. Sent as a data: URI; images are seen by the model,
 /// other files are read as text by the platform.
 struct PendingAttachment: Identifiable, Equatable {
