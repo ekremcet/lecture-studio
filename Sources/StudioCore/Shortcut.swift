@@ -87,7 +87,7 @@ public struct Shortcut: Equatable, Hashable, Sendable {
 
 /// Everything the user can put a shortcut on.
 public enum ShortcutAction: String, CaseIterable, Identifiable, Sendable {
-    case save, exportDeck, refreshLibrary, startPresenting, nextSlide, previousSlide, endPresentation, toggleBreak, toggleCountdown
+    case save, exportDeck, find, findAndReplace, findNext, findPrevious, refreshLibrary, startPresenting, nextSlide, previousSlide, endPresentation, toggleBreak, toggleCountdown
     case toggleChat, togglePreview, toggleEditor, toggleNotes
 
     public var id: String { rawValue }
@@ -96,6 +96,10 @@ public enum ShortcutAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .save: "Save"
         case .exportDeck: "Export…"
+        case .find: "Find…"
+        case .findAndReplace: "Find and Replace…"
+        case .findNext: "Find Next"
+        case .findPrevious: "Find Previous"
         case .refreshLibrary: "Refresh Library"
         case .startPresenting: "Start Presenting"
         case .nextSlide: "Next Slide"
@@ -114,6 +118,10 @@ public enum ShortcutAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .save: Shortcut("s", .command)
         case .exportDeck: Shortcut("e", [.command, .shift])
+        case .find: Shortcut("f", .command)
+        case .findAndReplace: Shortcut("f", [.command, .option])
+        case .findNext: Shortcut("g", .command)
+        case .findPrevious: Shortcut("g", [.command, .shift])
         case .refreshLibrary: Shortcut("r", .command)
         case .startPresenting: Shortcut("p", [.command, .option])
         case .nextSlide: Shortcut("right")
