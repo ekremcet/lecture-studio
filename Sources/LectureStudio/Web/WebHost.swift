@@ -99,14 +99,15 @@ enum WebHost {
 
 /// The app's web views. When a web view is first responder, WebKit reports every ⌘-key as handled by
 /// the page, so the menu bar never sees ⌘Q, ⌘H, ⌘, or ⌘S: the app cannot be quit from the editor.
-/// Offer ⌘-keys to the menu bar first. The Edit menu stays with the page, so CodeMirror keeps its
-/// own undo, copy, paste and select-all.
+/// Offer ⌘-keys to the menu bar first. The Edit menu's own items stay with the page, so CodeMirror
+/// keeps its own undo, copy, paste and select-all; its Find submenu goes to the menu bar like the rest.
 final class StudioWebView: WKWebView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command), window?.firstResponder === self, let items = NSApp.mainMenu?.items {
             for item in items {
-                guard let menu = item.submenu, !Self.isEditMenu(menu) else { continue }
-                if menu.performKeyEquivalent(with: event) { return true }
+                guard let menu = item.submenu else { continue }
+                let menus = Self.isEditMenu(menu) ? menu.items.compactMap(\.submenu) : [menu]
+                if menus.contains(where: { $0.performKeyEquivalent(with: event) }) { return true }
             }
         }
         return super.performKeyEquivalent(with: event)

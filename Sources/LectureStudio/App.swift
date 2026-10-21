@@ -31,6 +31,21 @@ struct LectureStudioApp: App {
                     .keyboardShortcut(store.shortcut(for: .exportDeck)?.keyboardShortcut)
                     .disabled(!store.canExport)
             }
+            // Edit › Find drives the editor's find bar. It takes the place of the system text-editing
+            // items, whose Find would only reach the native text fields.
+            CommandGroup(replacing: .textEditing) {
+                Menu("Find") {
+                    let canFind = store.stage == .work && store.isText
+                    Button("Find…") { store.showFind(replace: false) }
+                        .keyboardShortcut(store.shortcut(for: .find)?.keyboardShortcut).disabled(!canFind)
+                    Button("Find and Replace…") { store.showFind(replace: true) }
+                        .keyboardShortcut(store.shortcut(for: .findAndReplace)?.keyboardShortcut).disabled(!canFind)
+                    Button("Find Next") { store.editor.findNext() }
+                        .keyboardShortcut(store.shortcut(for: .findNext)?.keyboardShortcut).disabled(!canFind || store.editor.find.text.isEmpty)
+                    Button("Find Previous") { store.editor.findNext(backwards: true) }
+                        .keyboardShortcut(store.shortcut(for: .findPrevious)?.keyboardShortcut).disabled(!canFind || store.editor.find.text.isEmpty)
+                }
+            }
             // Menus follow the screen: View and Present exist only in the workspace.
             if store.stage == .work {
                 CommandMenu("View") {

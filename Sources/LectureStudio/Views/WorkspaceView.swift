@@ -106,6 +106,7 @@ struct WorkspaceView: View {
                 if store.isText {
                     VStack(spacing: 0) {
                         if store.isDeck { MarpToolbar(editor: store.editor); Divider() }
+                        if store.editor.find.shown { FindBar(editor: store.editor); Divider() }
                         WebViewHost(webView: store.editor.webView)
                     }
                 }

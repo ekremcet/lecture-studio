@@ -627,6 +627,13 @@ final class StudioStore {
         AppSettings.hiddenPanels = next.map(\.rawValue)
     }
 
+    /// Edit › Find: the find bar over the editor, bringing the editor back if it was hidden.
+    func showFind(replace: Bool) {
+        guard isText else { return }
+        if hiddenPanels.contains(.editor) { togglePanel(.editor) }
+        Task { await editor.showFind(replace: replace) }
+    }
+
     func movePanel(_ p: PanelId, by dir: Int) {
         guard let i = panelOrder.firstIndex(of: p) else { return }
         let j = i + dir

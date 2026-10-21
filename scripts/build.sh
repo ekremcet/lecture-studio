@@ -6,7 +6,8 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/web-core"
-[ -d node_modules ] || npm install --no-audit --no-fund
+# Install when node_modules is missing or older than the lock file (a dependency was added).
+[ node_modules/.package-lock.json -nt package-lock.json ] || npm install --no-audit --no-fund
 npm run build
 res="$root/Sources/LectureStudio/Resources"
 mkdir -p "$res/themes"

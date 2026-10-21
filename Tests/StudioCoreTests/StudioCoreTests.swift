@@ -647,6 +647,28 @@ final class ShortcutTests: XCTestCase {
     }
 }
 
+final class FindStatusTests: XCTestCase {
+    func testLabel() {
+        XCTAssertEqual(FindStatus(count: 3).label(query: ""), "")
+        XCTAssertEqual(FindStatus().label(query: "slide"), "No matches")
+        XCTAssertEqual(FindStatus(invalid: true).label(query: "(["), "Invalid pattern")
+        XCTAssertEqual(FindStatus(count: 1).label(query: "slide"), "1 match")
+        XCTAssertEqual(FindStatus(count: 12).label(query: "slide"), "12 matches")
+        XCTAssertEqual(FindStatus(count: 12, current: 3).label(query: "slide"), "3 of 12")
+        XCTAssertEqual(FindStatus(count: 1000, capped: true).label(query: "e"), "1000+ matches")
+        XCTAssertEqual(FindStatus(count: 1000, current: 2, capped: true).label(query: "e"), "2 of 1000+")
+    }
+
+    func testFindShortcuts() {
+        let t = ShortcutTable()
+        XCTAssertEqual(t.shortcut(for: .find), Shortcut("f", .command))
+        XCTAssertEqual(t.shortcut(for: .findAndReplace), Shortcut("f", [.command, .option]))
+        XCTAssertEqual(t.shortcut(for: .findNext), Shortcut("g", .command))
+        XCTAssertEqual(t.shortcut(for: .findPrevious), Shortcut("g", [.command, .shift]))
+        XCTAssertFalse(ShortcutAction.findNext.isPresenterKey)
+    }
+}
+
 final class SyllabusTests: XCTestCase {
     func testSyllabusForExistingCourse() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("syllabus-\(UUID().uuidString)")
