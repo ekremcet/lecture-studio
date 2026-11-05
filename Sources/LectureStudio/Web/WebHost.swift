@@ -118,6 +118,56 @@ final class StudioWebView: WKWebView {
     }
 }
 
+/// Keeps the preview page in its web view. A click on a link in a deck or document used to load the
+/// link into the shared preview web view itself, which replaced the preview page with no way back to
+/// it. Web and mail links now open in the default browser, links to repo files (a linked PDF, say)
+/// open in their own app, and links to a heading on the same page still scroll there.
+@MainActor
+final class ExternalLinkPolicy: NSObject, WKNavigationDelegate, WKUIDelegate {
+    static let shared = ExternalLinkPolicy()
+
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+        guard let url = action.request.url, action.targetFrame?.isMainFrame ?? true else { return .allow }
+        // The app's own page load (loadHTMLString) and script-driven work stay in the view.
+        guard action.navigationType == .linkActivated || action.navigationType == .formSubmitted || !Self.isOwn(url) else {
+            return .allow
+        }
+        if Self.isSamePage(url, webView.url) { return .allow }
+        Self.openOutside(url)
+        return .cancel
+    }
+
+    /// `target="_blank"` and `window.open`: never open a second web view, hand the link out instead.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = action.request.url { Self.openOutside(url) }
+        return nil
+    }
+
+    private static func isOwn(_ url: URL) -> Bool {
+        ["studio-app", "about", "data", "blob"].contains(url.scheme?.lowercased() ?? "")
+    }
+
+    /// Only the fragment differs: an in-page anchor such as a table-of-contents link.
+    private static func isSamePage(_ a: URL, _ b: URL?) -> Bool {
+        guard let b, a.fragment != nil else { return false }
+        func strip(_ u: URL) -> String { u.absoluteString.components(separatedBy: "#")[0] }
+        return strip(a) == strip(b)
+    }
+
+    private static func openOutside(_ url: URL) {
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme == StudioSchemeHandler.scheme {
+            // studio-app://repo/<path>: a file in the course repo; open it in the app that owns it.
+            guard url.host == "repo", let fs = WebHost.schemeHandler.repo() else { return }
+            let rel = url.pathComponents.dropFirst().joined(separator: "/")
+            if let file = try? fs.resolve(rel) { NSWorkspace.shared.open(file) }
+            return
+        }
+        guard ["http", "https", "mailto"].contains(scheme) else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
 /// Decode a JSON-like value from the bridge into a Codable.
 func decodeBridge<T: Decodable>(_ type: T.Type, _ value: Any?) -> T? {
     guard let value, JSONSerialization.isValidJSONObject(value), let d = try? JSONSerialization.data(withJSONObject: value) else { return nil }

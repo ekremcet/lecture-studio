@@ -61,6 +61,8 @@ final class PreviewController: NSObject {
         webView = StudioWebView(frame: .zero, configuration: cfg)
         super.init()
         webView.setValue(false, forKey: "drawsBackground")
+        webView.navigationDelegate = ExternalLinkPolicy.shared
+        webView.uiDelegate = ExternalLinkPolicy.shared
         bridge.onMessage = { [weak self] _, body in
             guard let self, let d = body as? [String: Any], let type = d["type"] as? String else { return }
             switch type {
