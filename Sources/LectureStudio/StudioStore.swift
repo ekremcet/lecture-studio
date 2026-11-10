@@ -929,22 +929,19 @@ final class StudioStore {
             toasts.error("Could not attach the file", error)
             return
         }
-        conv.running = true
-        conv.turnStarted = Date()
+        let id = UUID().uuidString
+        conv.turn.begin(id: id)
         var userMsg = ChatMessage(role: .user, content: t.isEmpty ? "(attached \(attachments.count) file\(attachments.count == 1 ? "" : "s"))" : t)
         userMsg.attachments = attachments.map { ChatAttachment(id: nil, kind: $0.isImage ? "image" : "file", url: $0.url.absoluteString, name: $0.name, mime_type: $0.mime) }
         conv.messages.append(userMsg)
         conv.messages.append(ChatMessage(role: .assistant, content: ""))
         saveConversation(conv)
-        let id = UUID().uuidString
-        conv.turnId = id
         do {
             try await agent.send(id: id, message: t.isEmpty ? "See the attached file(s)." : t, context: scope.context, sessionId: conv.sessionId, model: model, tags: scope.tags, attachments: payloads)
         } catch {
             conv.patchLast(now: true) { $0.error = error.localizedDescription }
-            conv.running = false
-            conv.turnId = nil
-            conv.turnStarted = nil
+            // The turn never started on the bridge: end it (only it), without draining the queue.
+            conv.turn.end(id: id)
             toasts.error("The assistant stopped", error)
         }
     }
@@ -957,11 +954,17 @@ final class StudioStore {
         let conv = conversation(scope.key)
         let t = text.trimmed
         guard !t.isEmpty else { return false }
-        guard conv.running, let id = conv.turnId else { await sendMessage(scope: scope, text: t); return false }
-        guard conv.pendingSteer == nil else { toasts.show(.info, "One steering note at a time", "The earlier note is still waiting for the assistant's next step."); return false }
-        conv.pendingSteer = t
+        let id: String
+        switch conv.turn.offerSteer(t) {
+        case .success(let turnId): id = turnId
+        case .failure(.notRunning): await sendMessage(scope: scope, text: t); return false
+        case .failure(.alreadyPending):
+            toasts.show(.info, "One steering note at a time", "The earlier note is still waiting for the assistant's next step.")
+            return false
+        }
         let accepted = await agent.steer(id: id, message: t)
-        conv.pendingSteer = nil
+        // The turn may have ended (or a newer one begun) while the bridge tried: then this does nothing.
+        conv.turn.settleSteer(id: id)
         if accepted {
             var m = ChatMessage(role: .user, content: t)
             m.steering = true
@@ -1044,10 +1047,10 @@ final class StudioStore {
             }
         case "approval":
             conv.flushPatches()
-            conv.approval = decodeBridge(ApprovalRequest.self, d["request"])
+            conv.turn.ask(approval: decodeBridge(ApprovalRequest.self, d["request"]))
         case "question":
             conv.flushPatches()
-            conv.question = decodeBridge(PendingQuestions.self, d["pending"])
+            conv.turn.ask(question: decodeBridge(PendingQuestions.self, d["pending"]))
         case "done":
             let r = d["result"] as? [String: Any] ?? [:]
             if let sid = r["session_id"] as? String, !sid.isEmpty { conv.sessionId = sid }
@@ -1065,37 +1068,32 @@ final class StudioStore {
                 for s in steered { m.events.append("↪ read while working: \(s)") }
                 if let modelName, !modelName.isEmpty { m.events.append("model \(modelName)") }
             }
-            finishTurn(conv, completed: true)
+            finishTurn(conv, id: id, completed: true)
         case "error":
             let msg = d["message"] as? String ?? "stream failed"
             conv.patchLast(now: true) { $0.error = msg }
             toasts.error("The assistant stopped", msg)
-            finishTurn(conv, completed: false)
+            finishTurn(conv, id: id, completed: false)
         default: break
         }
     }
 
     /// Ends the turn. After a completed one the next queued message goes out; after a stop or an
     /// error the queue waits for the user.
-    private func finishTurn(_ conv: Conversation, completed: Bool) {
-        conv.running = false
-        conv.turnId = nil
-        conv.turnStarted = nil
-        conv.approval = nil
-        conv.question = nil
+    private func finishTurn(_ conv: Conversation, id: String, completed: Bool) {
+        conv.turn.end(id: id)
         saveConversation(conv)
         if completed { sendNextQueued(conv.key) }
     }
 
     func answerApproval(_ conv: Conversation, approved: Bool) {
-        guard let a = conv.approval else { return }
-        conv.approval = nil
+        // Taken off the turn before the answer goes out: the sheet's dismiss binding reads it as answered.
+        guard let a = conv.turn.takeApproval() else { return }
         Task { await agent.resolveApproval(a.tool_call_id, approved: approved) }
     }
 
     func answerQuestion(_ conv: Conversation, answer: [String: Any]) {
-        guard let q = conv.question else { return }
-        conv.question = nil
+        guard let q = conv.turn.takeQuestion() else { return }
         var a = answer
         a["tool_call_id"] = q.tool_call_id
         Task { await agent.answerQuestion(q.tool_call_id, answer: a) }

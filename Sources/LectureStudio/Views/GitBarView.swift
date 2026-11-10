@@ -6,23 +6,14 @@ struct GitBarView: View {
     @Environment(StudioStore.self) private var store
     @State private var st: GitStatus?
     @State private var msg = ""
-    @State private var busy: String?
+    /// The operation running now; one at a time.
+    @State private var busy: GitOp?
     @State private var open = false
 
     var git: GitClient? { store.repo.map { GitClient(root: $0.root) } }
     var changed: Int { st?.changes.count ?? 0 }
-    var pullReason: String {
-        guard let st else { return "" }
-        if st.upstream == nil { return "No upstream branch" }
-        if changed > 0 { return "Commit first, then pull" }
-        return st.behind == 0 ? "Nothing to pull" : ""
-    }
-    var pushReason: String {
-        guard let st else { return "" }
-        if st.upstream == nil { return "No upstream branch" }
-        if st.ahead == 0 { return changed > 0 ? "Commit first, then push" : "Nothing to push" }
-        return ""
-    }
+    var pullReason: String { st?.pullBlocker ?? "" }
+    var pushReason: String { st?.pushBlocker ?? "" }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -39,13 +30,13 @@ struct GitBarView: View {
                 if st != nil && (!pullReason.isEmpty || !pushReason.isEmpty) {
                     Text(Array(Set([pullReason, pushReason]).filter { !$0.isEmpty }).sorted().joined(separator: ". ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Button { op("pull") } label: { BusyLabel(busy: busy == "pull", idle: "Pull", working: "Pulling…") }.controlSize(.small).disabled(busy != nil || !pullReason.isEmpty || st == nil).help(pullReason.isEmpty ? "Pull with rebase" : pullReason)
-                Button { op("push") } label: { BusyLabel(busy: busy == "push", idle: "Push", working: "Pushing…") }.controlSize(.small).disabled(busy != nil || !pushReason.isEmpty || st == nil).help(pushReason.isEmpty ? "Push to the upstream branch" : pushReason)
+                Button { op(.pull) } label: { BusyLabel(busy: busy == .pull, idle: GitOp.pull.title, working: GitOp.pull.working) }.controlSize(.small).disabled(busy != nil || !pullReason.isEmpty || st == nil).help(pullReason.isEmpty ? "Pull with rebase" : pullReason)
+                Button { op(.push) } label: { BusyLabel(busy: busy == .push, idle: GitOp.push.title, working: GitOp.push.working) }.controlSize(.small).disabled(busy != nil || !pushReason.isEmpty || st == nil).help(pushReason.isEmpty ? "Push to the upstream branch" : pushReason)
             }
             if changed > 0 {
                 HStack(spacing: 6) {
-                    TextField("What changed?", text: $msg).textFieldStyle(.roundedBorder).controlSize(.small).onSubmit { op("commit") }
-                    Button { op("commit") } label: { BusyLabel(busy: busy == "commit", idle: "Commit all", working: "Committing…") }.controlSize(.small).buttonStyle(.borderedProminent).disabled(busy != nil || msg.trimmed.isEmpty)
+                    TextField("What changed?", text: $msg).textFieldStyle(.roundedBorder).controlSize(.small).onSubmit { op(.commit) }
+                    Button { op(.commit) } label: { BusyLabel(busy: busy == .commit, idle: GitOp.commit.title, working: GitOp.commit.working) }.controlSize(.small).buttonStyle(.borderedProminent).disabled(busy != nil || msg.trimmed.isEmpty)
                 }
             }
             if open, let st {
@@ -82,26 +73,26 @@ struct GitBarView: View {
         do { st = try await git.status(fetchFirst: fetch) } catch { store.toasts.error("Git status failed", error) }
     }
 
-    func op(_ kind: String) {
+    func op(_ kind: GitOp) {
         guard let git, busy == nil else { return }
         busy = kind
         Task {
             do {
                 switch kind {
-                case "commit":
+                case .commit:
                     let r = try await git.commitAll(msg)
                     store.toasts.success("Committed \(r.hash)", "\(r.files) file\(r.files == 1 ? "" : "s")")
                     msg = ""
-                case "push":
+                case .push:
                     store.toasts.success("Pushed", try await git.push())
-                default:
+                case .pull:
                     store.toasts.success("Pulled", try await git.pull())
                     await store.refreshFiles()
                     if !store.filePath.isEmpty && !store.dirty { await store.openFile(store.filePath, select: false) }
                 }
-                await refresh(fetch: kind != "commit")
+                await refresh(fetch: kind.refetches)
             } catch {
-                store.toasts.error("\(kind.capFirst) failed", error)
+                store.toasts.error("\(kind.rawValue.capFirst) failed", error)
             }
             busy = nil
         }

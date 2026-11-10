@@ -360,7 +360,7 @@ enum Smoke {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)  // the transcript settles, as before a real send
                 conv.messages.append(ChatMessage(role: .user, content: "stream test"))
                 conv.messages.append(ChatMessage(role: .assistant, content: ""))
-                conv.running = true
+                conv.turn.begin(id: "smoke-stream")
                 let cpu0 = Smoke.cpuSeconds(), t0 = Date()
                 let steps = 300
                 var mainThreadStalls = 0
@@ -372,7 +372,7 @@ enum Smoke {
                     if Date().timeIntervalSince(before) > 0.25 { mainThreadStalls += 1 }
                 }
                 conv.patchLast(now: true) { $0.content = reply }
-                conv.running = false
+                conv.turn.end(id: "smoke-stream")
                 try? await Task.sleep(nanoseconds: 700_000_000)
                 note("stream: chars=\(reply.count) steps=\(steps) wall=\(String(format: "%.1f", Date().timeIntervalSince(t0)))s cpu=\(String(format: "%.2f", Smoke.cpuSeconds() - cpu0))s stalls=\(mainThreadStalls)")
                 await Snapshot.capture(to: out.appendingPathComponent("stream"))

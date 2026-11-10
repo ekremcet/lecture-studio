@@ -87,6 +87,7 @@ public struct CourseMeta: Codable, Equatable, Sendable {
 public struct GitChange: Codable, Equatable, Hashable, Sendable {
     public var status: String
     public var path: String
+    public init(status: String, path: String) { self.status = status; self.path = path }
 }
 
 public struct GitCommitInfo: Codable, Equatable, Sendable {
@@ -104,6 +105,45 @@ public struct GitStatus: Codable, Equatable, Sendable {
     public var changes: [GitChange]
     public var lastCommit: GitCommitInfo?
     public var fetchError: String?
+
+    public init(root: String, branch: String, upstream: String? = nil, ahead: Int = 0, behind: Int = 0, changes: [GitChange] = [], lastCommit: GitCommitInfo? = nil, fetchError: String? = nil) {
+        self.root = root
+        self.branch = branch
+        self.upstream = upstream
+        self.ahead = ahead
+        self.behind = behind
+        self.changes = changes
+        self.lastCommit = lastCommit
+        self.fetchError = fetchError
+    }
+
+    /// Why Pull is off now, or nil when it can run.
+    public var pullBlocker: String? {
+        if upstream == nil { return "No upstream branch" }
+        if !changes.isEmpty { return "Commit first, then pull" }
+        return behind == 0 ? "Nothing to pull" : nil
+    }
+
+    /// Why Push is off now, or nil when it can run.
+    public var pushBlocker: String? {
+        if upstream == nil { return "No upstream branch" }
+        if ahead == 0 { return changes.isEmpty ? "Nothing to push" : "Commit first, then push" }
+        return nil
+    }
+}
+
+/// The operations the git bar runs, one at a time.
+public enum GitOp: String, CaseIterable, Sendable {
+    case commit, push, pull
+
+    public var title: String {
+        switch self { case .commit: "Commit all"; case .push: "Push"; case .pull: "Pull" }
+    }
+    public var working: String {
+        switch self { case .commit: "Committing…"; case .push: "Pushing…"; case .pull: "Pulling…" }
+    }
+    /// Whether the status should fetch again afterwards (a commit changes nothing on the remote).
+    public var refetches: Bool { self != .commit }
 }
 
 /// JSON helpers shared by the small settings files of the repo.

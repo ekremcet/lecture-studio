@@ -11,9 +11,16 @@ final class Exporter {
         var tool: MarpTool? { if case .ready(let t) = self { t } else { nil } }
     }
 
+    /// Whether an export runs, and what it is doing. `phase` only exists while one runs.
+    enum RunState: Equatable {
+        case idle
+        case running(phase: String)
+    }
+
     private(set) var status: ToolStatus = .unknown
-    private(set) var busy = false
-    private(set) var phase = ""
+    private(set) var runState: RunState = .idle
+    var busy: Bool { runState != .idle }
+    var phase: String { if case .running(let p) = runState { p } else { "" } }
     private var run: ProcessRunner.Handle?
     private var probeTask: Task<Void, Never>?
     private var probeGeneration = 0
@@ -60,9 +67,8 @@ final class Exporter {
             return .failure(ExportError(.noTool, "marp-cli is not available."))
         }
         guard !busy else { return .failure(ExportError(.failed, "An export is already running.")) }
-        busy = true
-        phase = tool.source == .npx ? "Starting marp-cli through npx…" : "Converting with \(tool.label)…"
-        defer { busy = false; phase = ""; run = nil }
+        runState = .running(phase: tool.source == .npx ? "Starting marp-cli through npx…" : "Converting with \(tool.label)…")
+        defer { runState = .idle; run = nil }
         let themes = WebHost.resource("themes").path
         let browser = AppSettings.browserPath
         return await MarpExporter.run(tool: tool, deck: deck, output: output, options: options, themeDir: themes, browserPath: browser.isEmpty ? nil : browser) { h in

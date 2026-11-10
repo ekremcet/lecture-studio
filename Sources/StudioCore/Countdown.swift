@@ -6,9 +6,9 @@ import Foundation
 /// mode only has to apply what a tick asks for.
 ///
 /// `index` says where in the plan the lecture is: even entries are teaching blocks, odd entries the breaks
-/// after them. `until` is nil in three different states, and the flags tell them apart: a clock that is
-/// stopped (`running` false), one that is on but waiting out a break (`running`, no `until`), and a block a
-/// break interrupted part-way (`pausedLeft`).
+/// after them. `state` says what the clock is doing there, as one value: stopped, counting a block down,
+/// waiting out the break after a block that ran out, or holding a block a break interrupted part-way.
+/// `running`, `until` and `pausedLeft` are read from it.
 public struct LectureCountdown: Equatable, Sendable {
     /// What one tick asks presenter mode to do.
     public enum Tick: Equatable, Sendable {
@@ -19,18 +19,33 @@ public struct LectureCountdown: Equatable, Sendable {
         case timeIsUp
     }
 
+    /// What the clock is doing. Each case carries only what it needs, so a stopped clock cannot hold an end
+    /// time and a counting one cannot hold paused seconds.
+    public enum State: Equatable, Sendable {
+        /// Off: no block counts and none starts by itself.
+        case stopped
+        /// A block is counting down to this end.
+        case counting(until: Date)
+        /// On, but a break has the room after a block that ran out; its end arms the next block.
+        case onBreak
+        /// On, but a break interrupted a block part-way; its end gives the block these seconds back.
+        case interrupted(left: TimeInterval)
+    }
+
     public private(set) var plan: LecturePlan
     /// Where in the plan the lecture is: even entries are blocks, odd ones the breaks after them.
     public private(set) var index = 0
     /// Whether a block that runs out hands the room to its break by itself.
     public var autoBreak: Bool
+    public private(set) var state: State = .stopped
+
     /// The lecturer turned the clock on: it walks the plan until they stop it.
-    public private(set) var running = false
+    public var running: Bool { state != .stopped }
     /// When the block counting down ends, or nil while the clock is stopped, waiting out a break, or holding
     /// a block that a break interrupted.
-    public private(set) var until: Date?
+    public var until: Date? { if case .counting(let end) = state { end } else { nil } }
     /// What was left of a block when a break interrupted it, so a stretch mid-block does not cost the block.
-    public private(set) var pausedLeft: TimeInterval?
+    public var pausedLeft: TimeInterval? { if case .interrupted(let left) = state { left } else { nil } }
 
     public init(plan: LecturePlan = LecturePlan(), autoBreak: Bool = true) {
         self.plan = plan
@@ -50,18 +65,14 @@ public struct LectureCountdown: Equatable, Sendable {
 
     /// Arm the clock: this block starts counting down now.
     public mutating func start(now: Date = Date()) {
-        running = true
-        pausedLeft = nil
         index = index - index % 2          // always on a block: a break is never counted
-        until = now.addingTimeInterval(Self.span(plan.lengths[index]))
+        state = .counting(until: now.addingTimeInterval(Self.span(plan.lengths[index])))
     }
 
     /// Stop it: no more blocks on their own. The place in the plan is kept, so the lecturer who stops to
     /// answer a question and starts again picks the lecture up where it was; `reset` is what a new one gets.
     public mutating func stop() {
-        running = false
-        until = nil
-        pausedLeft = nil
+        state = .stopped
     }
 
     /// A new lecture: the clock off, at the first block of the plan.
@@ -73,42 +84,46 @@ public struct LectureCountdown: Equatable, Sendable {
     /// A break took over — the clock's own, or one the lecturer started by hand. The seconds the block had
     /// left are kept.
     public mutating func suspend(now: Date = Date()) {
-        if let end = until, end > now { pausedLeft = end.timeIntervalSince(now) }
-        until = nil
+        // Only a counting block has seconds to keep; a stopped clock, or one already on a break, stays as it is.
+        guard case .counting(let end) = state else { return }
+        state = end > now ? .interrupted(left: end.timeIntervalSince(now)) : .onBreak
     }
 
     /// The break ended: arm the next block, unless the lecturer stopped the clock meanwhile. Returns the new
     /// end, so the caller can show it without waiting for the next tick.
     @discardableResult
     public mutating func resume(now: Date = Date()) -> Date? {
-        guard running else { return nil }
-        if let left = pausedLeft {
+        switch state {
+        case .stopped:
+            return nil
+        case .interrupted(let left):
             // A block a break interrupted picks up the seconds it had left.
-            pausedLeft = nil
-            until = now.addingTimeInterval(left)
-            return until
+            let end = now.addingTimeInterval(left)
+            state = .counting(until: end)
+            return end
+        case .onBreak, .counting:
+            // The block that ran out is done and this was its break: the next block of the plan starts, and after
+            // the last break of the plan the first block starts again.
+            index = (index - index % 2 + 2) % plan.lengths.count
+            let end = now.addingTimeInterval(Self.span(plan.lengths[index]))
+            state = .counting(until: end)
+            return end
         }
-        // The block that ran out is done and this was its break: the next block of the plan starts, and after
-        // the last break of the plan the first block starts again.
-        index = (index - index % 2 + 2) % plan.lengths.count
-        until = now.addingTimeInterval(Self.span(plan.lengths[index]))
-        return until
     }
 
     /// A second has passed — or a test says it has. Reports the block that has just run out, once.
     public mutating func tick(now: Date = Date()) -> Tick {
-        guard running, let end = until, now >= end else { return .none }
-        until = nil
-        pausedLeft = nil
+        guard case .counting(let end) = state, now >= end else { return .none }
         let b = index - index % 2
         guard autoBreak else {
             // The lecturer takes the breaks themselves: the block is done, and the next start of the clock
             // begins the next block of the plan rather than this one again.
-            running = false
+            state = .stopped
             index = (b + 2) % plan.lengths.count
             return .timeIsUp
         }
         index = b + 1                      // the break that follows this block takes the room
+        state = .onBreak
         return .startBreak(minutes: plan.lengths[index])
     }
 

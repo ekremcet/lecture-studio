@@ -42,16 +42,20 @@ final class Conversation {
     var messages: [ChatMessage] = []
     var todos: [ChatTodo] = []
     var sessionId: String?
-    var running = false
-    var approval: ApprovalRequest?
-    var question: PendingQuestions?
+    /// The turn in flight, if any, with the approval, questions and steering note it waits on. One value,
+    /// changed only through its transitions (see `ChatTurnState`), so no flag can say "running" without a
+    /// turn id, or hold an approval after the turn ended.
+    var turn: ChatTurnState<ApprovalRequest, PendingQuestions> = .idle
+    var running: Bool { turn.isRunning }
     /// The id of the in-flight turn on the bridge.
-    var turnId: String?
-    var turnStarted: Date?
+    var turnId: String? { turn.id }
+    var turnStarted: Date? { turn.started }
+    var approval: ApprovalRequest? { turn.approval }
+    var question: PendingQuestions? { turn.question }
+    /// A steering message offered to the running turn, until a step takes it (or the turn ends).
+    var pendingSteer: String? { turn.steer }
     /// Messages typed while a turn runs; they go out one by one once the assistant is free.
     var queued: [QueuedMessage] = []
-    /// A steering message offered to the running turn, until a step takes it (or the turn ends).
-    var pendingSteer: String?
 
     /// Stream patches wait here and land together (`flushInterval`), so a fast stream changes the
     /// observed `messages` a few times a second instead of once per token. Every token used to
@@ -81,9 +85,7 @@ final class Conversation {
         messages = a.messages
         queued = []
         todos = []
-        pendingSteer = nil
-        approval = nil
-        question = nil
+        turn.clearPrompts()
     }
 
     /// Changes the last message. Patches queue in order and land on the next tick; `now` lands the
@@ -121,12 +123,10 @@ final class Conversation {
         updated = created
         messages = []
         queued = []
-        pendingSteer = nil
         todos = []
-        pendingSteer = nil
         sessionId = nil
-        approval = nil
-        question = nil
+        // The turn itself is left to its cancel (`resetConversation` sends one); only its prompts go.
+        turn.clearPrompts()
     }
 }
 
