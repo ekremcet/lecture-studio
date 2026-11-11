@@ -19,6 +19,7 @@ struct MarpHelpSheet: View {
         Row(what: "Images", how: "![alt](./assets/file.png) from the unit's assets folder. Marp extras: ![bg](…) for a background, ![bg right](…) or ![bg left:40%](…) for a split, ![w:400](…) to size."),
         Row(what: "Columns and HTML", how: "HTML is enabled: <div class=\"two-columns\"><div class=\"column\">…</div></div> gives two columns with the house style; small inline styles work too."),
         Row(what: "Math", how: "$…$ and $$…$$ when the front matter has math: mathjax."),
+        Row(what: "Diagrams", how: "A ```mermaid code block is drawn as a Mermaid diagram (flowchart, sequenceDiagram, classDiagram, …) in the preview, the presentation and the export. A diagram that does not parse stays code, with the error under it."),
         Row(what: "Themes", how: "The app ships the ytu-lecture and ytu-talk themes (a lecture and a talk style); the default Marp theme is used when a deck names none. A style: | block in the front matter overrides sizes, colours and spacing."),
         Row(what: "Export", how: "Export in the toolbar (or File › Export…) writes a PDF or a PowerPoint (next to the deck unless you choose elsewhere) with marp-cli, the same renderer as the preview. It needs marp-cli and a browser (Chrome, Edge, Chromium or Firefox) on this Mac; the sheet says what it found."),
         Row(what: "Checks", how: "\"Check slides\" renders every slide and flags text that runs past the slide edge or images that fail to load; the same check is available to the assistant as qa_deck."),

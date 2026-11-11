@@ -6,12 +6,69 @@
 import { renderDeckWith } from "./shared/marp";
 import { scanDocument, type QaResult } from "./shared/qa";
 import { slideStarts } from "./shared/slides";
+import { renderDiagram, cachedDiagram, diagramBlocks, diagramElement, diagramFences, errorMessage, DIAGRAM_CSS } from "./shared/mermaid";
 import MarkdownIt from "markdown-it";
 import { post, errorText } from "./bridge";
 
 const ASSET_BASE = "studio-app://repo/";
+const MERMAID_SRC = "studio-app://bundle/studio-mermaid.js";
 let themes: Record<string, string> = {};
 let raf = 0;
+
+{
+  const style = document.createElement("style");
+  style.id = "studio-mermaid-style";
+  style.textContent = `.studio-mermaid{margin:.4em 0}.studio-mermaid > svg{${DIAGRAM_CSS}}` +
+    ".studio-mermaid-error{margin:.3em 0;padding:.25em .6em;border-left:4px solid #e5484d;background:#fdecec;color:#9f1d20;font:14px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap}";
+  document.head.appendChild(style);
+}
+
+/** Bumped on every render, so a diagram that finishes late never lands in a newer deck. */
+let renderSeq = 0;
+/** Settles when the current render's diagrams are drawn; the QA scan waits for it. */
+let diagramsDone: Promise<void> = Promise.resolve();
+/** The diagram last drawn at each position: kept on screen while an edited diagram re-renders. */
+let lastDiagrams: Array<string | undefined> = [];
+
+/**
+ * Swap each ```mermaid code block for its diagram. Cached diagrams go in at once, so typing elsewhere in
+ * the deck never flickers; new or edited ones render one after another, the previous drawing standing in.
+ * A diagram that does not parse shows its source and the error.
+ */
+async function drawDiagrams(seq: number): Promise<void> {
+  const blocks = diagramBlocks(deckRoot());
+  if (!blocks.length) { lastDiagrams = []; return; }
+  const next: Array<string | undefined> = [];
+  const pending: Array<{ el: HTMLElement; source: string; i: number }> = [];
+  blocks.forEach(({ pre, source }, i) => {
+    const hit = cachedDiagram(source);
+    if (hit) {
+      pre.replaceWith(diagramElement(hit));
+      next[i] = hit;
+    } else if (lastDiagrams[i]) {
+      const el = diagramElement(lastDiagrams[i]!);
+      pre.replaceWith(el);
+      pending.push({ el, source, i });
+    } else {
+      pending.push({ el: pre, source, i });
+    }
+  });
+  for (const p of pending) {
+    try {
+      const svg = await renderDiagram(p.source, MERMAID_SRC);
+      if (seq !== renderSeq) return;
+      p.el.replaceWith(diagramElement(svg));
+      next[p.i] = svg;
+    } catch (e) {
+      if (seq !== renderSeq) return;
+      // The source stays readable with the error under it, as the export leaves it.
+      const pre = blocks[p.i].pre;
+      if (p.el !== pre) p.el.replaceWith(pre);
+      pre.after(diagramElement("", "Mermaid: " + errorMessage(e)));
+    }
+  }
+  if (seq === renderSeq) lastDiagrams = next;
+}
 
 function deckRoot(): HTMLElement {
   let el = document.getElementById("deck");
@@ -112,6 +169,8 @@ const api = {
       document.body.classList.remove("doc");
       themeStyle().textContent = r.css;
       deckRoot().innerHTML = r.html;
+      const seq = ++renderSeq;
+      diagramsDone = drawDiagrams(seq).catch((e) => console.warn("diagrams", e));
       layout();
       if (keep) window.scrollTo(0, keep);
       const starts = slideStarts(markdown);
@@ -123,6 +182,7 @@ const api = {
     }
   },
   async scan(): Promise<QaResult> {
+    await diagramsDone;
     const r = await scanDocument(document);
     post("studio", { type: "qa", result: r });
     return r;
@@ -140,6 +200,30 @@ const api = {
   },
   starts(markdown: string): number[] {
     return slideStarts(markdown);
+  },
+  /**
+   * The deck as the export gives it to marp-cli, which cannot run Mermaid: each ```mermaid fence becomes
+   * an image of the diagram (`dir/diagram-N.svg`, written by Swift), sized as the preview sizes it. A
+   * diagram that does not parse keeps its fence and is reported.
+   */
+  async exportDiagrams(markdown: string, dir: string): Promise<{ markdown: string; files: Array<{ name: string; svg: string }>; errors: string[] }> {
+    const fences = diagramFences(markdown);
+    const lines = markdown.split("\n");
+    const files: Array<{ name: string; svg: string }> = [];
+    const errors: string[] = [];
+    // Bottom up, so the line numbers of the fences above stay valid.
+    for (const f of [...fences].reverse()) {
+      try {
+        const svg = await renderDiagram(f.source, MERMAID_SRC);
+        const name = `diagram-${fences.indexOf(f) + 1}.svg`;
+        files.push({ name, svg: '<?xml version="1.0" encoding="UTF-8"?>\n' + svg });
+        lines.splice(f.start, f.end - f.start, `${f.prefix}![mermaid diagram](<${dir}/${name}>)`);
+      } catch (e) {
+        errors.unshift(`Diagram on line ${f.start + 1}: ${errorMessage(e)}`);
+      }
+    }
+    if (files.length) lines.push("", "<style>", `img[alt="mermaid diagram"]{${DIAGRAM_CSS}}`, "</style>", "");
+    return { markdown: lines.join("\n"), files, errors };
   },
   /** A markdown or plain-text document instead of a deck (the document preview). */
   renderDocument(markdown: string, deckDir: string, plain: boolean) {
@@ -165,6 +249,7 @@ const api = {
       return defaultImage(tokens, idx, opts, env, self);
     };
     root.innerHTML = '<article class="md-view">' + md.render(markdown) + "</article>";
+    diagramsDone = drawDiagrams(++renderSeq).catch((e) => console.warn("diagrams", e));
   },
 };
 

@@ -29,6 +29,8 @@ toolchain and any editor.
 
 - **Decks are Markdown.** One `.md` file per deck, rendered live with Marp Core. The Export button (⇧⌘E) hands
   the deck to [marp-cli](https://github.com/marp-team/marp-cli) for a PDF or a PowerPoint; any Marp tool works too.
+- **Mermaid diagrams.** A ` ```mermaid ` code block is drawn as a diagram in the preview, the presentation, and
+  the PDF and PowerPoint exports.
 - **Every claim cites a source.** Sources are indexed per course and per unit; the assistant searches them and
   cites them under the answer instead of writing from memory.
 - **Notes, questions, guide.** Speaker notes slide by slide, retrieval questions, and an instructor guide from the
@@ -38,6 +40,7 @@ toolchain and any editor.
 - **Courses across terms.** A course is a folder of numbered units. New terms copy the old one and redate it;
   terms can be compared unit by unit.
 - **Presenter mode.** Audience window plus a presenter window with notes, the next slide, and a break countdown.
+  Pinch the slide on a trackpad to zoom in on a detail; Escape zooms back out.
 - **Overflow scan.** "Check slides" renders every slide and flags text past the slide edge and missing images.
 - **Your files, your folder.** The app reads and writes a folder you choose. Commit, push, and pull from the git
   bar; nothing is stored in a cloud by the app.

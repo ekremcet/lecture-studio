@@ -203,7 +203,7 @@ struct ExportSheet: View {
         // The panel keeps the type, but not always the extension.
         if output.pathExtension.lowercased() != options.format.fileExtension { output.appendPathExtension(options.format.fileExtension) }
         phase = .running
-        let r = await exporter.export(deck: deck, output: output, options: options)
+        let r = await exporter.export(deck: deck, output: output, options: options, diagrams: store.preview)
         switch r {
         case .success(let report):
             phase = .done(report)

@@ -90,6 +90,22 @@ enum Smoke {
             (() => { const css = (document.getElementById('theme') || {textContent: ''}).textContent; const secs = [...document.querySelectorAll('svg[data-marpit-svg] section')]; const first = secs[0]; return JSON.stringify({ cssHas20: css.includes('font-size: 20px'), cssHead: css.slice(0, 80), sections: secs.length, firstText: first && first.innerText.slice(0, 80), firstFont: first && getComputedStyle(first).fontSize, h1: first && first.querySelector('h1') && getComputedStyle(first.querySelector('h1')).fontSize, bodyBg: getComputedStyle(document.body).backgroundColor, headStyles: document.head.querySelectorAll('style').length, scheme: matchMedia('(prefers-color-scheme: dark)').matches }); })()
             """)
             note("preview probe3: \(probe3 ?? "nil")")
+            // `STUDIO_SMOKE_MERMAID=1` types a diagram into the deck one render at a time, as the editor does, then
+            // reports what the preview shows: the last version drawn, the broken one as source plus error, nothing left over.
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_MERMAID"] == "1" {
+                let base = store.diskText
+                let t0 = Date()
+                for i in 1...15 {
+                    let src = "\n---\n\n## Typing\n\n```mermaid\nflowchart LR\n  A[Start \(i)] -->|yes| B[End]\n```\n"
+                    await store.preview.render(markdown: base + src, deckDir: (store.filePath as NSString).deletingLastPathComponent)
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                let typed = try? await store.preview.webView.evaluateJavaScript("""
+                JSON.stringify({ diagrams: document.querySelectorAll('.studio-mermaid > svg').length, last: [...document.querySelectorAll('.studio-mermaid > svg')].pop()?.textContent.replace(/\\s+/g, ' ').trim(), errors: [...document.querySelectorAll('.studio-mermaid-error')].map(e => e.textContent.slice(0, 60)), strays: [...document.body.children].filter(e => e.id !== 'deck' && e.tagName !== 'SCRIPT').map(e => e.tagName + '#' + e.id) })
+                """)
+                note("mermaid typing: \(String(format: "%.1f", Date().timeIntervalSince(t0))) s \(typed ?? "nil")")
+                await store.preview.render(markdown: base, deckDir: (store.filePath as NSString).deletingLastPathComponent)
+            }
             let eprobe = try? await store.editor.webView.evaluateJavaScript("""
             (() => { const ed = document.querySelector('.cm-editor'); const sc = document.querySelector('.cm-scroller'); const r = ed && ed.getBoundingClientRect(); return JSON.stringify({ editorRect: r && [r.width, r.height], scrollH: sc && sc.scrollHeight, lines: document.querySelectorAll('.cm-line').length, inner: [innerWidth, innerHeight], docLen: window.studioEditor ? window.studioEditor.getValue().length : -1 }); })()
             """)
@@ -127,7 +143,7 @@ enum Smoke {
                 for o in [ExportOptions(format: .pdf, pdfNotes: true, pdfOutlines: true), ExportOptions(format: .pptx)] {
                     let output = out.appendingPathComponent("\(base).\(o.format.fileExtension)")
                     try? FileManager.default.removeItem(at: output)
-                    switch await store.exporter.export(deck: deck, output: output, options: o) {
+                    switch await store.exporter.export(deck: deck, output: output, options: o, diagrams: store.preview) {
                     case .success(let r):
                         let size = (try? FileManager.default.attributesOfItem(atPath: r.output.path)[.size] as? Int) ?? -1
                         note("export \(o.format.rawValue): \(r.output.lastPathComponent) bytes=\(size) seconds=\(String(format: "%.1f", r.seconds)) warnings=\(r.warnings)")
@@ -191,6 +207,7 @@ enum Smoke {
             await quitCheck("field", window: NSApp.windows.first { $0 is ShowWindow }, webView: store.presentation.show.webView, note: note)
             let showDir = out.appendingPathComponent("present")
             try? FileManager.default.createDirectory(at: showDir, withIntermediateDirectories: true)
+            if ProcessInfo.processInfo.environment["STUDIO_SMOKE_ZOOM"] == "1" { await zoomCheck(store.presentation, to: showDir, note: note) }
             // `STUDIO_SMOKE_PRESENT=1` drives the single-screen strip from inside: the events go through
             // NSApp.sendEvent, so the presenter's monitors see them as they see real input.
             if ProcessInfo.processInfo.environment["STUDIO_SMOKE_PRESENT"] == "1", let show = NSApp.windows.first(where: { $0 is ShowWindow }) {

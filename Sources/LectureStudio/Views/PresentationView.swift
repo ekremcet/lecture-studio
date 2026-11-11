@@ -1,10 +1,15 @@
 import SwiftUI
 import AppKit
+import WebKit
 import StudioCore
 
 /// Presenter mode: a borderless black window with the current slide on the second screen, and a presenter
 /// window with the current slide, the next slide, the speaker notes, a clock and the slide counter. Arrow
 /// keys and space move; Escape ends.
+///
+/// A trackpad pinch on the slide (the audience screen, or the presenter's current slide) zooms in on the
+/// point under the fingers, on both at once; two fingers pan while zoomed, a two-finger double tap or
+/// Escape zooms back out, and a new slide always starts unzoomed.
 ///
 /// The lecturer sets the lecture clock (the rhythm menu and the Timer button): the teaching and break minutes
 /// of one round, in order — "20 / 5 · 20 / 15" is two blocks, the long break after the second — and whether a
@@ -64,6 +69,11 @@ final class Presentation {
     private var showWindow: NSWindow?
     private var presenterWindow: NSWindow?
     private var keyMonitor: Any?
+    private var gestureMonitor: Any?
+    /// The pinch zoom on the current slide, shared by the audience screen and the presenter's copy.
+    private(set) var zoom = SlideZoom()
+    /// Width over height of the deck's slides, read from the rendered deck.
+    private(set) var slideAspect: CGFloat = 16 / 9
     private var pointerTimer: Timer?
     private var stripTimer: Timer?
     private var countdownTimer: Timer?
@@ -90,13 +100,17 @@ final class Presentation {
         startedAt = Date()
         presenting = true
         let dir = deckDir(store.filePath)
+        zoom = SlideZoom()
         Task {
             for c in [show, current, upcoming] { await c.render(markdown: markdown, deckDir: dir) }
+            await readSlideAspect()
             apply()
         }
         openWindows()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self, self.presenting else { return e }
+            // Escape steps out of a zoom first; the next Escape ends the show.
+            if e.keyCode == 53, self.zoom.isZoomed { self.resetZoom(animated: true); return nil }
             // The user's shortcuts first (Settings › Shortcuts), then the fixed presenter-remote keys.
             for a in ShortcutAction.allCases where a.isPresenterKey {
                 if let s = self.store?.shortcut(for: a), s.matches(e) { self.perform(a); return nil }
@@ -108,6 +122,11 @@ final class Presentation {
             default: return e
             }
         }
+        // Trackpad pinch, two-finger double tap and, while zoomed, two-finger pan over the slide.
+        gestureMonitor = NSEvent.addLocalMonitorForEvents(matching: [.magnify, .smartMagnify, .scrollWheel]) { [weak self] e in
+            guard let self, self.presenting else { return e }
+            return self.handleGesture(e) ? nil : e
+        }
         // The lecture clock. One tick a second is all it needs: the countdown is shown from dates, and the
         // only thing a tick decides is whether the block has run out and the break takes over.
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -116,11 +135,80 @@ final class Presentation {
     }
 
     private func apply() {
+        resetZoom(animated: false)
         show.present(index)
         current.present(index)
         upcoming.present(index + 1 < count ? index + 1 : -2)
         notes = Slides.notes(markdown, starts: starts, index: index)
         store?.goToSlide(index, from: "rail")
+    }
+
+    // MARK: Pinch zoom
+
+    /// The deck's slide shape, so the zoom maths letterboxes the slide the way the page does.
+    private func readSlideAspect() async {
+        let js = "const s = document.querySelector('svg[data-marpit-svg]'); const b = s && s.viewBox.baseVal; return b && b.width && b.height ? b.width / b.height : 0"
+        let r = try? await show.webView.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page)
+        if let a = (r as? NSNumber)?.doubleValue, a > 0 { slideAspect = a }
+    }
+
+    /// The slide web view under a gesture, and the gesture's point in it (top-left origin, in points).
+    /// The next-slide preview and a running break are left alone.
+    private func slideTarget(for e: NSEvent) -> (PreviewController, CGPoint)? {
+        guard breakUntil == nil, let w = e.window else { return nil }
+        let c: PreviewController
+        if w === showWindow { c = show } else if w === presenterWindow { c = current } else { return nil }
+        let v = c.webView
+        guard v.window === w else { return nil }
+        var p = v.convert(e.locationInWindow, from: nil)
+        guard v.bounds.contains(p) else { return nil }
+        if !v.isFlipped { p.y = v.bounds.height - p.y }
+        return (c, p)
+    }
+
+    /// True when the gesture was the slide's: a pinch, a double tap, or a pan while zoomed. Anything else
+    /// (scrolling the notes, scrolling while unzoomed) goes on as before.
+    private func handleGesture(_ e: NSEvent) -> Bool {
+        guard let (c, p) = slideTarget(for: e) else { return false }
+        switch e.type {
+        case .magnify:
+            zoomSlide(by: 1 + e.magnification, at: p, on: c)
+        case .smartMagnify:
+            if zoom.isZoomed { resetZoom(animated: true) } else { zoomSlide(by: 2, at: p, on: c, animated: true) }
+        case .scrollWheel:
+            guard zoom.isZoomed else { return false }
+            // A mouse wheel reports lines, a trackpad points.
+            let k: CGFloat = e.hasPreciseScrollingDeltas ? 1 : 12
+            panSlide(by: CGSize(width: e.scrollingDeltaX * k, height: e.scrollingDeltaY * k), on: c)
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// Move the zoomed slide with the fingers by `d` points in `c`'s web view.
+    func panSlide(by d: CGSize, on c: PreviewController) {
+        guard presenting, zoom.isZoomed else { return }
+        zoom.pan(by: d, in: c.webView.bounds.size, aspect: slideAspect)
+        settleZoom(animated: false)
+    }
+
+    /// Zoom by `factor` about `point` in `c`'s web view (top-left origin, in points), on both slide views.
+    func zoomSlide(by factor: CGFloat, at point: CGPoint, on c: PreviewController, animated: Bool = false) {
+        guard presenting else { return }
+        zoom.zoom(by: factor, at: point, in: c.webView.bounds.size, aspect: slideAspect)
+        settleZoom(animated: animated)
+    }
+
+    func resetZoom(animated: Bool) {
+        zoom = SlideZoom()
+        for c in [show, current] { c.setZoom(zoom, aspect: slideAspect, animated: animated) }
+    }
+
+    /// Keep the audience screen's view inside the slide, then draw the zoom on both slide views.
+    private func settleZoom(animated: Bool) {
+        zoom.clamp(in: show.webView.bounds.size, aspect: slideAspect)
+        for c in [show, current] { c.setZoom(zoom, aspect: slideAspect, animated: animated) }
     }
 
     /// Put a break up on the audience screen for this many minutes. The rhythm's own breaks use the plan's
@@ -241,6 +329,9 @@ final class Presentation {
         guard presenting else { return }
         presenting = false
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+        if let m = gestureMonitor { NSEvent.removeMonitor(m); gestureMonitor = nil }
+        zoom = SlideZoom()
+        for c in [show, current] { c.setZoom(zoom, aspect: slideAspect, animated: false) }
         pointerTimer?.invalidate(); pointerTimer = nil
         stripTimer?.invalidate(); stripTimer = nil
         countdownTimer?.invalidate(); countdownTimer = nil
@@ -369,6 +460,7 @@ struct PresenterView: View {
         if !presentation.keyHint(.toggleBreak).isEmpty { parts.append("\(presentation.keyHint(.toggleBreak)) for a break") }
         if !presentation.keyHint(.toggleCountdown).isEmpty { parts.append("\(presentation.keyHint(.toggleCountdown)) for the lecture timer") }
         if !presentation.keyHint(.endPresentation).isEmpty { parts.append("\(presentation.keyHint(.endPresentation)) to end") }
+        parts.append("pinch the slide to zoom")
         return parts.joined(separator: ", ")
     }
 
@@ -572,5 +664,87 @@ struct BreakView: View {
                 .onChange(of: left) { _, v in if v == 0 { Task { try? await Task.sleep(nanoseconds: 3_000_000_000); if presentation.breakUntil == until { presentation.endBreak() } } } }
             }
         }
+    }
+}
+
+/// The pinch zoom on a presented slide, kept in slide terms so the audience screen and the presenter's
+/// smaller copy show the same part of the slide: `center` is the slide point (0…1 across and down) in the
+/// middle of the view. The slide sits in each view as the page lays it out, fitted and centred.
+struct SlideZoom: Equatable {
+    static let maxScale: CGFloat = 6
+    var scale: CGFloat = 1
+    var center = CGPoint(x: 0.5, y: 0.5)
+
+    var isZoomed: Bool { scale > 1.001 }
+
+    /// Where the page puts the unzoomed slide in a view of this size: fitted, centred, letterboxed.
+    static func slideRect(in v: CGSize, aspect: CGFloat) -> CGRect {
+        let w = min(v.width, v.height * aspect), h = w / aspect
+        return CGRect(x: (v.width - w) / 2, y: (v.height - h) / 2, width: w, height: h)
+    }
+
+    /// The slide point (0…1) shown at `p` (top-left origin, in points) in a view of size `v`.
+    func slidePoint(at p: CGPoint, in v: CGSize, aspect: CGFloat) -> CGPoint {
+        let r = Self.slideRect(in: v, aspect: aspect)
+        return CGPoint(x: center.x + (p.x - v.width / 2) / (scale * r.width),
+                       y: center.y + (p.y - v.height / 2) / (scale * r.height))
+    }
+
+    /// Scale by `factor`, keeping the slide point under `p` where it is.
+    mutating func zoom(by factor: CGFloat, at p: CGPoint, in v: CGSize, aspect: CGFloat) {
+        guard factor.isFinite, factor > 0, v.width > 0, v.height > 0, aspect > 0 else { return }
+        let u = slidePoint(at: p, in: v, aspect: aspect)
+        let r = Self.slideRect(in: v, aspect: aspect)
+        scale = min(Self.maxScale, max(1, scale * factor))
+        center = CGPoint(x: u.x - (p.x - v.width / 2) / (scale * r.width),
+                         y: u.y - (p.y - v.height / 2) / (scale * r.height))
+        clamp(in: v, aspect: aspect)
+    }
+
+    /// Move the zoomed slide with the fingers by `d` points on screen.
+    mutating func pan(by d: CGSize, in v: CGSize, aspect: CGFloat) {
+        guard isZoomed, v.width > 0, v.height > 0, aspect > 0 else { return }
+        let r = Self.slideRect(in: v, aspect: aspect)
+        center.x -= d.width / (scale * r.width)
+        center.y -= d.height / (scale * r.height)
+        clamp(in: v, aspect: aspect)
+    }
+
+    /// Keep the view on the slide: no black beyond its edges while it is larger than the view, centred on
+    /// an axis where it still fits. Back at full size it is simply unzoomed.
+    mutating func clamp(in v: CGSize, aspect: CGFloat) {
+        guard isZoomed else { self = SlideZoom(); return }
+        guard v.width > 0, v.height > 0, aspect > 0 else { return }
+        let r = Self.slideRect(in: v, aspect: aspect)
+        let hx = v.width / (2 * scale * r.width), hy = v.height / (2 * scale * r.height)
+        center.x = hx >= 0.5 ? 0.5 : min(max(center.x, hx), 1 - hx)
+        center.y = hy >= 0.5 ? 0.5 : min(max(center.y, hy), 1 - hy)
+    }
+
+    /// The CSS translation (before `scale`) that puts `center` in the middle of a view of size `v`.
+    func translation(in v: CGSize, aspect: CGFloat) -> CGPoint {
+        var z = self
+        z.clamp(in: v, aspect: aspect)
+        let r = Self.slideRect(in: v, aspect: aspect)
+        return CGPoint(x: v.width / 2 - z.scale * (r.minX + z.center.x * r.width),
+                       y: v.height / 2 - z.scale * (r.minY + z.center.y * r.height))
+    }
+}
+
+extension PreviewController {
+    /// Draw a slide zoom over the presented slide. The page's own fit stays as it is: the zoom is a
+    /// transform on the deck around it, cleared when unzoomed.
+    func setZoom(_ z: SlideZoom, aspect: CGFloat, animated: Bool) {
+        let t = z.translation(in: webView.bounds.size, aspect: aspect)
+        let css = z.isZoomed ? "translate(\(t.x)px, \(t.y)px) scale(\(z.scale))" : ""
+        let js = """
+        const d = document.getElementById('deck');
+        if (d) {
+          d.style.transformOrigin = '0 0';
+          d.style.transition = animated ? 'transform .18s ease-out' : 'none';
+          d.style.transform = css;
+        }
+        """
+        webView.callAsyncJavaScript(js, arguments: ["css": css, "animated": animated], in: nil, in: .page, completionHandler: nil)
     }
 }

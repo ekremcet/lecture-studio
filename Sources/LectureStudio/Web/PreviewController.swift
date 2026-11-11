@@ -142,6 +142,22 @@ final class PreviewController: NSObject {
         _ = try? await webView.callAsyncJavaScript("return window.studioPreview.renderDocument(markdown, deckDir, plain)", arguments: ["markdown": markdown, "deckDir": deckDir, "plain": plain], contentWorld: .page)
     }
 
+    /// The deck rewritten for marp-cli, which cannot draw Mermaid: each ```mermaid fence becomes an image of
+    /// the diagram, `dir/<file name>`, which the caller writes. A diagram that does not parse stays a code block.
+    struct DiagramExport: Decodable {
+        struct File: Decodable { var name: String; var svg: String }
+        var markdown: String
+        var files: [File]
+        var errors: [String]
+    }
+
+    func exportDiagrams(markdown: String, dir: String) async throws -> DiagramExport {
+        await whenReady()
+        let r = try await webView.callAsyncJavaScript("return await window.studioPreview.exportDiagrams(markdown, dir)", arguments: ["markdown": markdown, "dir": dir], contentWorld: .page)
+        guard let d = decodeBridge(DiagramExport.self, r) else { throw RepoPathError("preview returned no diagrams") }
+        return d
+    }
+
     func scan() async throws -> QaResult {
         await whenReady()
         let r = try await webView.callAsyncJavaScript("return await window.studioPreview.scan()", arguments: [:], contentWorld: .page)

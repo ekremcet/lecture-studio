@@ -11,7 +11,7 @@ cd "$root/web-core"
 npm run build
 res="$root/Sources/LectureStudio/Resources"
 mkdir -p "$res/themes"
-cp dist/studio-preview.js dist/studio-editor.js dist/studio-agent.js "$res/"
+cp dist/studio-preview.js dist/studio-editor.js dist/studio-agent.js dist/studio-mermaid.js "$res/"
 cp dist/themes/*.css "$res/themes/"
 cd "$root"
 swift build "$@"

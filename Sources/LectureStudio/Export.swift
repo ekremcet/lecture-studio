@@ -59,8 +59,9 @@ final class Exporter {
         }
     }
 
-    /// Run marp-cli on `deck` (a file on disk) into `output`. The caller saved the deck first.
-    func export(deck: URL, output: URL, options: ExportOptions) async -> Result<ExportReport, ExportError> {
+    /// Run marp-cli on `deck` (a file on disk) into `output`. The caller saved the deck first. With a
+    /// `diagrams` preview, ```mermaid fences are drawn there first and handed to marp-cli as images.
+    func export(deck: URL, output: URL, options: ExportOptions, diagrams: PreviewController? = nil) async -> Result<ExportReport, ExportError> {
         await probe()
         guard let tool = status.tool else {
             if case .missing(let e) = status { return .failure(e) }
@@ -69,11 +70,48 @@ final class Exporter {
         guard !busy else { return .failure(ExportError(.failed, "An export is already running.")) }
         runState = .running(phase: tool.source == .npx ? "Starting marp-cli through npx…" : "Converting with \(tool.label)…")
         defer { runState = .idle; run = nil }
+        var input = deck
+        var diagramWarnings: [String] = []
+        var scratch: [URL] = []
+        defer { for u in scratch { try? FileManager.default.removeItem(at: u) } }
+        if let preview = diagrams, let text = try? String(contentsOf: deck, encoding: .utf8), Self.mayHaveDiagrams(text) {
+            let phase = phase
+            runState = .running(phase: "Drawing diagrams…")
+            do {
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("studio-diagrams-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                scratch.append(dir)
+                let d = try await preview.exportDiagrams(markdown: text, dir: dir.path)
+                diagramWarnings = d.errors
+                if !d.files.isEmpty {
+                    for f in d.files { try f.svg.write(to: dir.appendingPathComponent(f.name), atomically: true, encoding: .utf8) }
+                    // Next to the deck, so its relative assets resolve as they do for the deck itself; removed after the run.
+                    let base = (deck.lastPathComponent as NSString).deletingPathExtension
+                    let copy = deck.deletingLastPathComponent().appendingPathComponent(".\(base).studio-export.md")
+                    try d.markdown.write(to: copy, atomically: true, encoding: .utf8)
+                    scratch.append(copy)
+                    input = copy
+                }
+            } catch {
+                return .failure(ExportError(.failed, "The Mermaid diagrams could not be prepared: \(error.localizedDescription)"))
+            }
+            runState = .running(phase: phase)
+        }
         let themes = WebHost.resource("themes").path
         let browser = AppSettings.browserPath
-        return await MarpExporter.run(tool: tool, deck: deck, output: output, options: options, themeDir: themes, browserPath: browser.isEmpty ? nil : browser) { h in
+        let r = await MarpExporter.run(tool: tool, deck: input, output: output, options: options, themeDir: themes, browserPath: browser.isEmpty ? nil : browser) { h in
             Task { @MainActor in self.run = h }
         }
+        return r.map { report in
+            var report = report
+            report.warnings = diagramWarnings + report.warnings
+            return report
+        }
+    }
+
+    /// A ```mermaid or ~~~mermaid fence somewhere in the deck; the preview's parser decides which are real.
+    static func mayHaveDiagrams(_ text: String) -> Bool {
+        text.range(of: #"(```|~~~)[ \t]*mermaid"#, options: .regularExpression) != nil
     }
 
     func cancel() {

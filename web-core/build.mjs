@@ -35,6 +35,9 @@ for (const f of await readdir(path.join(root, "themes"))) {
   if (f.endsWith(".css")) await cp(path.join(root, "themes", f), path.join(out, "themes", f));
 }
 
+// Mermaid ships its own browser build; the preview loads it only for decks that have a diagram.
+await cp(path.join(here, "node_modules/mermaid/dist/mermaid.min.js"), path.join(out, "studio-mermaid.js"));
+
 if (watch) {
   const ctx = await context(options);
   await ctx.watch();

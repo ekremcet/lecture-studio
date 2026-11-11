@@ -330,7 +330,7 @@ struct PublishSheet: View {
                     let pdfRel = (rel as NSString).deletingPathExtension + ".pdf"
                     let out = try fs.resolve(pdfRel)
                     var opts = AppSettings.exportOptions; opts.format = .pdf
-                    switch await store.exporter.export(deck: deckURL, output: out, options: opts) {
+                    switch await store.exporter.export(deck: deckURL, output: out, options: opts, diagrams: store.preview) {
                     case .success:
                         let size = (try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int) ?? 0
                         p.items.append(PublishItem(unit: u == 0 ? nil : u, path: (pdfRel as NSString).lastPathComponent, source: .repo(pdfRel), kind: .pdf, size: size, selected: true))
