@@ -109,6 +109,21 @@ final class Exporter {
         }
     }
 
+    /// A markdown document (not a deck) as a PDF, printed from the preview so it looks like the preview.
+    /// marp-cli plays no part, so this works without it. Mermaid that does not parse prints as its source.
+    func exportDocument(markdown: String, deckDir: String, plain: Bool, output: URL, preview: PreviewController) async -> Result<ExportReport, ExportError> {
+        guard !busy else { return .failure(ExportError(.failed, "An export is already running.")) }
+        runState = .running(phase: "Printing the document…")
+        defer { runState = .idle }
+        let t0 = Date()
+        do {
+            try await preview.printDocument(markdown: markdown, deckDir: deckDir, plain: plain, to: output)
+        } catch {
+            return .failure(ExportError(.noOutput, "The PDF could not be written.", hint: "Check that the folder can be written to, then try again."))
+        }
+        return .success(ExportReport(output: output, seconds: Date().timeIntervalSince(t0)))
+    }
+
     /// A ```mermaid or ~~~mermaid fence somewhere in the deck; the preview's parser decides which are real.
     static func mayHaveDiagrams(_ text: String) -> Bool {
         text.range(of: #"(```|~~~)[ \t]*mermaid"#, options: .regularExpression) != nil

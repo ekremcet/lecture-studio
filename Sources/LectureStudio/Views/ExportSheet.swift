@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 import StudioCore
 
 /// Export the open deck: the format and its options, what marp-cli and browser were found, then the
-/// save panel and the run itself, with its outcome in the same sheet.
+/// save panel and the run itself, with its outcome in the same sheet. A markdown document that is not a
+/// deck exports as a PDF of its preview, which needs neither marp-cli nor a browser.
 struct ExportSheet: View {
     @Environment(StudioStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -21,13 +22,18 @@ struct ExportSheet: View {
 
     var exporter: Exporter { store.exporter }
     var deckName: String { (store.filePath as NSString).lastPathComponent }
-    var outputName: String { ((deckName as NSString).deletingPathExtension) + "." + options.format.fileExtension }
+    var outputName: String { ((deckName as NSString).deletingPathExtension) + "." + format.fileExtension }
+    /// A markdown document, not a deck: PDF only, printed from the preview.
+    var document: Bool { store.exportsDocument }
+    var format: ExportFormat { document ? .pdf : options.format }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DialogHeader(title: "Export \(deckName)", icon: "square.and.arrow.up", description: "marp-cli renders the deck as the preview shows it and a browser prints it: a PDF, or a PowerPoint with one image per slide and the speaker notes kept.")
+            DialogHeader(title: "Export \(deckName)", icon: "square.and.arrow.up", description: document
+                         ? "The document becomes a PDF that looks like its preview, with its images and diagrams, on pages of your default paper size."
+                         : "marp-cli renders the deck as the preview shows it and a browser prints it: a PDF, or a PowerPoint with one image per slide and the speaker notes kept.")
             switch phase {
-            case .options: optionsBody
+            case .options: if document { documentBody } else { optionsBody }
             case .running: runningBody
             case .done(let r): doneBody(r)
             case .failed(let e): failedBody(e)
@@ -35,7 +41,7 @@ struct ExportSheet: View {
         }
         .dialogFrame(width: 560)
         .interactiveDismissDisabled(phase == .running)
-        .task { await exporter.probe() }
+        .task { if !document { await exporter.probe() } }
     }
 
     // MARK: options
@@ -70,6 +76,23 @@ struct ExportSheet: View {
             Spacer()
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
             Button("Export…") { Task { await run() } }.keyboardShortcut(.defaultAction).disabled(!canExport)
+        }
+    }
+
+    /// A document: no format or options, nothing to look for, only the save and the file.
+    @ViewBuilder var documentBody: some View {
+        dirtyNote
+        HStack {
+            Spacer()
+            Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            Button("Export PDF…") { Task { await run() } }.keyboardShortcut(.defaultAction).disabled(exporter.busy || !store.canExport)
+        }
+    }
+
+    @ViewBuilder var dirtyNote: some View {
+        if store.dirty {
+            Label(store.staleOnDisk ? "Unsaved edits are saved first. The file also changed on disk; exporting saves your version over it." : "Unsaved edits are saved first.", systemImage: "info.circle")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -127,10 +150,12 @@ struct ExportSheet: View {
                 ProgressView().controlSize(.small)
                 Text(exporter.phase.isEmpty ? "Saving…" : exporter.phase).font(.callout)
             }
-            Text("The first run starts the browser, which takes a few seconds; npx downloads marp-cli on its first use.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Spacer()
-                Button("Cancel") { exporter.cancel() }.keyboardShortcut(.cancelAction)
+            if !document {
+                Text("The first run starts the browser, which takes a few seconds; npx downloads marp-cli on its first use.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { exporter.cancel() }.keyboardShortcut(.cancelAction)
+                }
             }
         }
     }
@@ -185,7 +210,8 @@ struct ExportSheet: View {
     /// Save if needed, ask where the file goes, run marp-cli, show the outcome.
     func run() async {
         guard let repo = store.repo, store.canExport else { return }
-        AppSettings.exportOptions = options
+        let document = document
+        if !document { AppSettings.exportOptions = options }
         if store.dirty {
             await store.save()
             // Save shows its own toast when the file cannot be written; nothing to export then.
@@ -193,17 +219,19 @@ struct ExportSheet: View {
         }
         let deck = repo.root.appendingPathComponent(store.filePath)
         let panel = NSSavePanel()
-        panel.title = "Export \(options.format.title)"
+        panel.title = "Export \(format.title)"
         panel.prompt = "Export"
         panel.canCreateDirectories = true
-        panel.allowedContentTypes = [options.format == .pdf ? .pdf : Self.pptxType]
+        panel.allowedContentTypes = [format == .pdf ? .pdf : Self.pptxType]
         panel.nameFieldStringValue = outputName
         panel.directoryURL = deck.deletingLastPathComponent()
         guard panel.runModal() == .OK, var output = panel.url else { return }
         // The panel keeps the type, but not always the extension.
-        if output.pathExtension.lowercased() != options.format.fileExtension { output.appendPathExtension(options.format.fileExtension) }
+        if output.pathExtension.lowercased() != format.fileExtension { output.appendPathExtension(format.fileExtension) }
         phase = .running
-        let r = await exporter.export(deck: deck, output: output, options: options, diagrams: store.preview)
+        let r = document
+            ? await exporter.exportDocument(markdown: store.previewText, deckDir: deckDir(store.filePath), plain: false, output: output, preview: store.preview)
+            : await exporter.export(deck: deck, output: output, options: options, diagrams: store.preview)
         switch r {
         case .success(let report):
             phase = .done(report)

@@ -537,10 +537,13 @@ final class StudioStore {
 
     /// Only a deck that is open in the workspace can be presented.
     var canPresent: Bool { stage == .work && isDeck && !filePath.isEmpty }
-    /// And exported: marp-cli reads the file on disk.
-    var canExport: Bool { canPresent && repo != nil }
+    /// And exported: marp-cli reads the file on disk. A markdown document exports too, as a PDF of its preview.
+    var canExport: Bool { stage == .work && !filePath.isEmpty && repo != nil && (isDeck || exportsDocument) }
+    /// The open file is a markdown document, not a deck: its export is a PDF printed from the preview.
+    var exportsDocument: Bool { kind == .md }
 
     /// Export to PDF or PowerPoint: the sheet asks the format and the file, marp-cli does the rest.
+    /// A document goes to PDF only, printed from its preview.
     func exportDeck() {
         guard canExport else { return }
         dialog = .export

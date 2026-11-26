@@ -86,6 +86,12 @@ public struct ExportReport: Equatable, Sendable {
     /// marp-cli's warnings worth reading (a missing image, for one), the noise stripped.
     public var warnings: [String]
     public var seconds: Double
+
+    public init(output: URL, warnings: [String] = [], seconds: Double) {
+        self.output = output
+        self.warnings = warnings
+        self.seconds = seconds
+    }
 }
 
 /// Finds a working marp-cli. A found binary is not a working one: a global install can break with a

@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import WebKit
 import StudioCore
 
@@ -100,6 +101,19 @@ final class PreviewController: NSObject {
         .md-view img{max-width:100%}.md-view blockquote{border-left:3px solid #d1d5db;margin:0;padding-left:12px;color:#6b7280}
         .md-view h1{font-size:24px}.md-view h2{font-size:19px;margin-top:24px}.md-view h3{font-size:16px}
         .md-view pre.plain{background:transparent;white-space:pre-wrap;padding:0}
+        @media print{
+        /* The system font prints without a text map (an "i" copies as "!"): print a static font of the same look. */
+        html,body,body.doc{background:#fff;padding:0}
+        *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        .md-view{max-width:none;padding:0}
+        .md-view,.md-view svg *{font-family:"Helvetica Neue",Helvetica,Arial,sans-serif!important}
+        .md-view code,.md-view pre{font-family:Menlo,monospace!important}
+        .md-view pre{white-space:pre-wrap;word-break:break-word;overflow:visible}
+        .md-view table{max-width:100%}.md-view table.print-wide :is(td,th){overflow-wrap:anywhere}
+        .md-view svg{max-width:100%}
+        .md-view pre,.md-view tr,.md-view img,.md-view blockquote,.md-view svg{break-inside:avoid}
+        .md-view .print-keep{break-inside:avoid}
+        }
         """
         webView.loadHTMLString(WebHost.page(script: "studio-preview.js", body: "<div id=\"deck\"></div>", style: style), baseURL: URL(string: "studio-app://preview/"))
     }
@@ -142,6 +156,66 @@ final class PreviewController: NSObject {
         _ = try? await webView.callAsyncJavaScript("return window.studioPreview.renderDocument(markdown, deckDir, plain)", arguments: ["markdown": markdown, "deckDir": deckDir, "plain": plain], contentWorld: .page)
     }
 
+    /// A markdown document as a PDF that looks like its preview: the preview page renders it, waits for its
+    /// diagrams and images, and WebKit prints it into `output`, paginated on the system's paper size.
+    func printDocument(markdown: String, deckDir: String, plain: Bool, to output: URL) async throws {
+        await renderDocument(markdown: markdown, deckDir: deckDir, plain: plain)
+        _ = try? await webView.callAsyncJavaScript("await window.studioPreview.settled()", arguments: [:], contentWorld: .page)
+        // WebKit ignores break-after: avoid, so a heading could end a page. Each run of headings goes in an
+        // unbreakable block with the block that follows it, when that one is short; a long one may still split
+        // (keeping it whole would leave most of a page blank).
+        _ = try? await webView.callAsyncJavaScript("""
+            const view = document.querySelector(".md-view");
+            const isHeading = (e) => /^H[1-6]$/.test(e.tagName);
+            for (const h of view ? [...view.children].filter(isHeading) : []) {
+              if (h.parentElement !== view) continue;
+              const run = [h];
+              let next = h.nextElementSibling;
+              while (next && isHeading(next)) { run.push(next); next = next.nextElementSibling; }
+              if (!next || next.getBoundingClientRect().height > 220) continue;
+              const keep = document.createElement("div");
+              keep.className = "print-keep";
+              h.before(keep);
+              keep.append(...run, next);
+            }
+            // A short table stays whole too; a long one splits between rows. One wider than the page may break
+            // its words, or the whole document would print shrunk to fit it.
+            for (const t of view ? view.querySelectorAll("table") : []) {
+              if (t.getBoundingClientRect().height <= 300) t.classList.add("print-keep");
+              if (t.scrollWidth > 680) t.classList.add("print-wide");
+            }
+            """, arguments: [:], contentWorld: .page)
+        try? FileManager.default.removeItem(at: output)
+        let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+        info.jobDisposition = .save
+        info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = output
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isHorizontallyCentered = false
+        info.isVerticallyCentered = false
+        for m in [\NSPrintInfo.topMargin, \.bottomMargin] { info[keyPath: m] = 48 }
+        for m in [\NSPrintInfo.leftMargin, \.rightMargin] { info[keyPath: m] = 54 }
+        webView.configuration.preferences.shouldPrintBackgrounds = true
+        let op = webView.printOperation(with: info)
+        op.showsPrintPanel = false
+        op.showsProgressPanel = false
+        op.jobTitle = output.deletingPathExtension().lastPathComponent
+        // A WKWebView prints blank pages unless its print view has a size of its own.
+        op.view?.frame = NSRect(x: 0, y: 0, width: info.paperSize.width, height: info.paperSize.height)
+        let ok = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            if let window = webView.window ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) {
+                let done = PrintDone { c.resume(returning: $0) }
+                op.runModal(for: window, delegate: done, didRun: #selector(PrintDone.printOperationDidRun(_:success:contextInfo:)), contextInfo: Unmanaged.passRetained(done).toOpaque())
+            } else {
+                c.resume(returning: op.run())
+            }
+        }
+        // The preview as it was, without the print blocks.
+        await renderDocument(markdown: markdown, deckDir: deckDir, plain: plain)
+        let size = (try? FileManager.default.attributesOfItem(atPath: output.path)[.size] as? Int) ?? 0
+        guard ok, size > 0 else { throw RepoPathError("WebKit did not write the PDF") }
+    }
+
     /// The deck rewritten for marp-cli, which cannot draw Mermaid: each ```mermaid fence becomes an image of
     /// the diagram, `dir/<file name>`, which the caller writes. A diagram that does not parse stays a code block.
     struct DiagramExport: Decodable {
@@ -175,5 +249,17 @@ final class PreviewController: NSObject {
 
     func scrollTo(page: Int, smooth: Bool) {
         Task { _ = try? await webView.callAsyncJavaScript("window.studioPreview.scrollTo(page, smooth)", arguments: ["page": page, "smooth": smooth], contentWorld: .page) }
+    }
+}
+
+/// The end of a print operation run as a sheet: AppKit calls back through a selector, this turns it into a closure.
+/// The caller retains it through `contextInfo`; the callback releases it.
+@MainActor
+private final class PrintDone: NSObject {
+    let done: (Bool) -> Void
+    init(_ done: @escaping (Bool) -> Void) { self.done = done }
+    @objc func printOperationDidRun(_ op: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        if let contextInfo { Unmanaged<PrintDone>.fromOpaque(contextInfo).release() }
+        done(success)
     }
 }

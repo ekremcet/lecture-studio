@@ -75,6 +75,50 @@ enum Smoke {
                 note("publish states: \(store.publishStates.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value.rawValue)" }.joined(separator: " "))")
                 await Snapshot.capture(to: out.appendingPathComponent("weeks-after"))
             }
+            // `STUDIO_SMOKE_DOC=<repo path>` opens a markdown document and exports it as a PDF of its preview, into
+            // the smoke folder; `STUDIO_SMOKE_DOC_HIDDEN=1` exports again with the preview panel hidden.
+            if let docPath = ProcessInfo.processInfo.environment["STUDIO_SMOKE_DOC"] {
+                guard let f = store.files.first(where: { $0.path == docPath }) else { note("doc: \(docPath) not in the library"); return }
+                store.openUnit(f.unit, path: f.path)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                note("doc: file=\(store.filePath) kind=\(store.kind) canExport=\(store.canExport) document=\(store.exportsDocument)")
+                if let w = NSApp.windows.first(where: { $0.isVisible && $0.title == "Lecture Studio" }) { _ = await Snapshot.captureWindow(w, to: out.appendingPathComponent("doc-window.png")) }
+                let base = ((f.path as NSString).lastPathComponent as NSString).deletingPathExtension
+                @MainActor func exportDoc(_ name: String) async {
+                    let output = out.appendingPathComponent(name)
+                    switch await store.exporter.exportDocument(markdown: store.previewText, deckDir: deckDir(store.filePath), plain: false, output: output, preview: store.preview) {
+                    case .success(let r):
+                        let size = (try? FileManager.default.attributesOfItem(atPath: r.output.path)[.size] as? Int) ?? -1
+                        note("doc export: \(name) bytes=\(size) seconds=\(String(format: "%.1f", r.seconds))")
+                    case .failure(let e): note("doc export \(name) failed: \(e.kind) \(e.message)")
+                    }
+                }
+                await exportDoc("\(base).pdf")
+                // Again with the export sheet open, as the sheet runs it: the print then starts under a window with a sheet.
+                store.dialog = .export
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await exportDoc("\(base)-sheet.pdf")
+                store.dialog = nil
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if ProcessInfo.processInfo.environment["STUDIO_SMOKE_DOC_HIDDEN"] == "1" {
+                    let wasHidden = store.hiddenPanels.contains(.preview)
+                    if !wasHidden { store.togglePanel(.preview) }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    await exportDoc("\(base)-hidden.pdf")
+                    if !wasHidden { store.togglePanel(.preview) }
+                }
+                store.dialog = .export
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }), let sheet = w.attachedSheet {
+                    let shot = Process()
+                    shot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    shot.arguments = ["-x", "-o", "-l", String(sheet.windowNumber), out.appendingPathComponent("doc-export-sheet.png").path]
+                    try? shot.run(); shot.waitUntilExit()
+                }
+                store.dialog = nil
+                note("doc: done")
+                return
+            }
             let units = Set(store.files.filter { $0.course == course }.map(\.unit)).sorted(by: Labels.sortUnits)
             guard let deck = store.files.first(where: { $0.course == course && $0.kind == .deck }) else { note("no deck in \(course); units=\(units)"); return }
             store.openUnit(deck.unit, path: deck.path)

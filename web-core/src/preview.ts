@@ -181,6 +181,13 @@ const api = {
       throw e;
     }
   },
+  /** Settles once the current render's diagrams are drawn and its images loaded: the document PDF waits for it. */
+  async settled(): Promise<void> {
+    await diagramsDone;
+    await Promise.all(Array.from(document.images).map((img) =>
+      img.complete ? Promise.resolve() : new Promise<void>((r) => { img.onload = img.onerror = () => r(); })));
+    await document.fonts?.ready;
+  },
   async scan(): Promise<QaResult> {
     await diagramsDone;
     const r = await scanDocument(document);
